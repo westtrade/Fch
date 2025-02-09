@@ -1,0 +1,31 @@
+{
+	"name": "fch",
+	"version": "1.0.0",
+	"description": "A lightweight fetch helper library with retry, infinite stream and timeout functionality.",
+	"main": "dist/Fch.js",
+	"types": "dist/index.d.ts",
+	"scripts": {
+		"build": "tsc",
+		"playground": "bun run --watch ./src/playground.ts",
+		"prepublishOnly": "npm run build"
+	},
+	"keywords": [
+		"fetch",
+		"request",
+		"retry",
+		"timeout",
+		"http"
+	],
+	"author": "westtrade",
+	"license": "MIT",
+	"devDependencies": {
+		"@mswjs/interceptors": "^0.37.6",
+		"msw": "^2.7.0",
+		"typescript": "^5.0.0",
+		"vitest": "^3.0.5",
+		"winston": "^3.17.0"
+	},
+	"files": [
+		"dist"
+	]
+}

@@ -1,0 +1,15 @@
+{
+	"compilerOptions": {
+		"target": "es2019",
+		"module": "CommonJS",
+		"outDir": "./dist",
+		"esModuleInterop": true,
+		"strict": true,
+		"removeComments": true,
+		"sourceMap": true,
+		"declaration": true,
+		"emitDeclarationOnly": false
+	},
+	"include": ["src/**/*.ts"],
+	"exclude": ["node_modules", "src/playground.ts"]
+}
