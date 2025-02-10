@@ -41,7 +41,7 @@ export interface Logger {
  * const api = new Fch('https://api.example.com', { timeout: 3000 });
  * api.setHeaders({ 'Content-Type': 'application/json' }).get();
  */
-export default class Fch extends URL {
+export class Fch extends URL {
 	// Properties documentation
 
 	/**
@@ -79,6 +79,10 @@ export default class Fch extends URL {
 	 * Add request interceptor
 	 * @param {function(Fch): void} interceptor - Interceptor function
 	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.addRequestInterceptor((request) => {
+	 *     request.setHeader('X-Custom-Header', 'value');
+	 * });
 	 */
 	addRequestInterceptor(interceptor: (request: Fch) => void) {
 		this.requestInterceptors.push(interceptor);
@@ -130,26 +134,19 @@ export default class Fch extends URL {
 	}
 
 	private adaptLogger(logger?: Logger): Logger {
-		if (!logger) {
-			return this.createDefaultLogger();
-		}
-
-		if (
+		return logger &&
 			typeof logger.info === "function" &&
 			typeof logger.warn === "function" &&
 			typeof logger.error === "function"
-		) {
-			return logger as Logger;
-		}
-
-		return this.createDefaultLogger();
+			? logger
+			: this.createDefaultLogger();
 	}
 
 	private createDefaultLogger(): Logger {
 		return {
-			info: (message: string) => console.log(`[INFO] ${message}`),
-			warn: (message: string) => console.warn(`[WARN] ${message}`),
-			error: (message: string) => console.error(`[ERROR] ${message}`),
+			info: console.log.bind(console, "[INFO]"),
+			warn: console.warn.bind(console, "[WARN]"),
+			error: console.error.bind(console, "[ERROR]"),
 		};
 	}
 
@@ -192,7 +189,13 @@ export default class Fch extends URL {
 		};
 	}
 
-	// Устанавливаем параметры поискового запроса
+	/**
+	 * Set search params for the request
+	 * @param {Record<string, string>} params - Key/value pairs of search params
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setSearchParams({ key: 'value' });
+	 */
 	setSearchParams(params: Record<string, string>) {
 		for (const [key, value] of Object.entries(params)) {
 			this.searchParams.set(key, value);
@@ -200,6 +203,13 @@ export default class Fch extends URL {
 		return this;
 	}
 
+	/**
+	 * Append search params for the request
+	 * @param {Record<string, string | string[]>} params - Key/value pairs of search params
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.appendSearchParams({ key: 'value' });
+	 */
 	appendSearchParams(params: Record<string, string | string[]>) {
 		for (const [key, value] of Object.entries(params)) {
 			if (Array.isArray(value)) {
@@ -211,6 +221,14 @@ export default class Fch extends URL {
 		return this;
 	}
 
+	/**
+	 * Append data to FormData
+	 * @param {string} key - Key
+	 * @param {string | Blob} value - Value
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.appendToFormData('key', 'value');
+	 */
 	appendToFormData(key: string, value: string | Blob) {
 		if (!this.formData) {
 			this.formData = new FormData();
@@ -222,6 +240,15 @@ export default class Fch extends URL {
 		return this;
 	}
 
+	/**
+	 * Set FormData for the request
+	 * @param {FormData} formData - FormData
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * const formData = new FormData();
+	 * formData.append('key', 'value');
+	 * api.setFormData(formData);
+	 */
 	setFormData(formData: FormData) {
 		this.formData = formData;
 		if (this.fetchOptions.method !== "PUT") {
@@ -244,11 +271,25 @@ export default class Fch extends URL {
 		return this;
 	}
 
+	/**
+	 * Set HTTP method for the request
+	 * @param {string} method - HTTP method
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setMethod('POST');
+	 */
 	setMethod(method: string) {
 		this.fetchOptions.method = method.toUpperCase();
 		return this;
 	}
 
+	/**
+	 * Set fetch options
+	 * @param {RequestInit} options - Fetch options
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setFetchOptions({ method: 'POST' });
+	 */
 	setFetchOptions(options: RequestInit) {
 		this.fetchOptions = { ...this.fetchOptions, ...options };
 		return this;
@@ -262,38 +303,88 @@ export default class Fch extends URL {
 		this.fetchOptions.method = value.toUpperCase();
 	}
 
+	/**
+	 * Set request timeout
+	 * @param {number} timeout - Timeout in milliseconds
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setTimeout(3000);
+	 */
 	setTimeout(timeout: number) {
 		this.timeout = timeout;
 		return this;
 	}
 
+	/**
+	 * Set number of retries for the request
+	 * @param {number} retries - Number of retries
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setRetries(3);
+	 */
 	setRetries(retries: number) {
 		this.retries = retries;
 		return this;
 	}
 
+	/**
+	 * Set Authorization header with Bearer token
+	 * @param {string} token - Bearer token
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setAuthToken('my-token');
+	 */
 	setAuthToken(token: string) {
 		this.headers.set("Authorization", `Bearer ${token}`);
 		return this;
 	}
 
+	/**
+	 * Set Authorization header with Basic auth
+	 * @param {string} username - Username
+	 * @param {string} password - Password
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setBasicAuth('user', 'pass');
+	 */
 	setBasicAuth(username: string, password: string) {
 		const auth = btoa(`${username}:${password}`);
 		this.headers.set("Authorization", `Basic ${auth}`);
 		return this;
 	}
 
+	/**
+	 * Set CORS mode for the request
+	 * @param {RequestMode} mode - CORS mode
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setCORS('cors');
+	 */
 	setCORS(mode: RequestMode) {
 		this.fetchOptions.mode = mode;
 		return this;
 	}
 
+	/**
+	 * Disable cache for the request
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.disableCache();
+	 */
 	disableCache() {
 		this.fetchOptions.cache = "no-store";
 		return this;
 	}
 
-	setBody(body: string | Blob | null, contentType?: string) {
+	/**
+	 * Set request body
+	 * @param {string | Blob | null} body - Request body
+	 * @param {string} [contentType] - Content-Type header
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setBody('{"key": "value"}', 'application/json');
+	 */
+	setBody(body: string | ArrayBuffer | Blob | null, contentType?: string) {
 		this.formData = null;
 		this.fetchOptions.body = body;
 		if (contentType) {
@@ -302,6 +393,13 @@ export default class Fch extends URL {
 		return this;
 	}
 
+	/**
+	 * Set form-urlencoded request body with proper Content-Type
+	 * @param {Record<string, string | number | boolean | (string | number | boolean)[]>} data - Data to be encoded
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.setFormUrlEncodedBody({ username: 'user', password: 'pass' });
+	 */
 	setFormUrlEncodedBody(
 		data: Record<
 			string,
@@ -331,14 +429,28 @@ export default class Fch extends URL {
 	 * @param {Record<string, T>} json - JSON-serializable object
 	 * @returns {Fch} Current instance for chaining
 	 */
-	setJsonBody<T>(json: Record<string, T>) {
+	setJsonBody<T>(json: T) {
 		return this.setBody(JSON.stringify(json), "application/json");
 	}
 
+	/**
+	 * Get header value by name
+	 * @param {string} name - Header name
+	 * @returns {string | null} Header value
+	 * @example
+	 * const headerValue = api.getHeader('Content-Type');
+	 */
 	getHeader(name: string) {
 		return this.headers.get(name);
 	}
 
+	/**
+	 * Delete header by name
+	 * @param {string} name - Header name
+	 * @returns {Fch} Current instance for chaining
+	 * @example
+	 * api.deleteHeader('Content-Type');
+	 */
 	deleteHeader(name: string) {
 		this.headers.delete(name);
 		return this;
@@ -359,10 +471,7 @@ export default class Fch extends URL {
 			`Making request to ${this.toString()} with method ${this.method}`
 		);
 
-		// Применяем request interceptors
-		for (const interceptor of this.requestInterceptors) {
-			interceptor(this);
-		}
+		this.requestInterceptors.forEach((interceptor) => interceptor(this));
 
 		const fetchWithTimeout = async () => {
 			const timeoutId = setTimeout(
@@ -371,27 +480,23 @@ export default class Fch extends URL {
 			);
 
 			try {
-				const response = fetch(this.toString(), {
+				const response = await fetch(this.toString(), {
 					...this.fetchOptions,
 					signal: this.controller.signal,
 				});
 				clearTimeout(timeoutId);
 
-				let processedResponse = response;
-				for (const interceptor of this.responseInterceptors) {
-					processedResponse = await interceptor(processedResponse);
-				}
-
-				return processedResponse;
+				return this.responseInterceptors.reduce(
+					async (prev, interceptor) => interceptor(await prev),
+					response
+				);
 			} catch (error) {
 				clearTimeout(timeoutId);
-
 				throw error;
 			}
 		};
 
-		let attempt = 0;
-		while (attempt < retries) {
+		for (let attempt = 0; attempt < retries; attempt++) {
 			if (attempt > 0 && retryTimeout > 0) {
 				await new Promise((resolve) =>
 					setTimeout(resolve, retryTimeout)
@@ -400,24 +505,23 @@ export default class Fch extends URL {
 
 			try {
 				const response = await fetchWithTimeout();
-
 				this.logger.info(
 					`Received response with status ${response.status}`
 				);
-
 				return response;
 			} catch (error) {
 				this.logger.error(`Request failed: ${error.message}`);
-
-				if (attempt < this.retries - 1) {
-					attempt++;
-				} else {
-					throw error;
-				}
+				if (attempt === retries - 1) throw error;
 			}
 		}
 	}
 
+	/**
+	 * Attaches callbacks for the resolution and/or rejection of the Promise.
+	 * @param {function} onFulfilled - Callback for fulfilled promise
+	 * @param {function} onRejected - Callback for rejected promise
+	 * @returns {Promise} Promise for chaining
+	 */
 	then(onFulfilled: (value: any) => any, onRejected?: (reason: any) => any) {
 		return this.makeRequest().then(onFulfilled, onRejected);
 	}
@@ -480,24 +584,33 @@ export default class Fch extends URL {
 		clone.requestInterceptors = [...this.requestInterceptors];
 		clone.responseInterceptors = [...this.responseInterceptors];
 
-		if (this.fetchOptions.body) {
-			if (this.fetchOptions.body instanceof FormData) {
-				const formDataCopy = new FormData();
-				this.fetchOptions.body.forEach((value, key) =>
-					formDataCopy.append(key, value)
-				);
-				clone.setFormData(formDataCopy);
-			} else if (typeof this.fetchOptions.body === "string") {
-				clone.setBody(this.fetchOptions.body);
-			} else {
-				console.warn("Cannot clone non-serializable body");
-			}
+		if (this.fetchOptions.body instanceof FormData) {
+			const formDataCopy = new FormData();
+			this.fetchOptions.body.forEach((value, key) =>
+				formDataCopy.append(key, value)
+			);
+			clone.setFormData(formDataCopy);
+		} else if (typeof this.fetchOptions.body === "string") {
+			clone.setBody(this.fetchOptions.body);
+		} else if (this.fetchOptions.body) {
+			console.warn("Cannot clone non-serializable body");
 		}
 
 		return clone;
 	}
 
-	async *stream(
+	/**
+	 * Create request stream with delay between attempts
+	 * @param {number} [delay=300] - Delay between requests in milliseconds
+	 * @param {AbortController} [abortController] - Controller for stream termination
+	 * @yields {Promise<[Response|Error, AbortController]>} Response/error with controller
+	 * @example
+	 * const stream = api.stream(500);
+	 * for await (const response of stream) {
+	 *     console.log(response);
+	 * }
+	 */
+	async *poll(
 		delay = 300,
 		abortController: AbortController = this.controller
 	) {
@@ -528,3 +641,5 @@ export default class Fch extends URL {
 export const fch = (url: string, options: FetchRequestOptions = {}): Fch => {
 	return new Fch(url, options);
 };
+
+export default fch;

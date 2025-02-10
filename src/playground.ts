@@ -1,8 +1,8 @@
-import Fch from "./Fch";
+import fch from "./Fch";
 
 try {
 	let counter = 0;
-	const request = new Fch("https://reqres.in/api/users", {
+	const request = fch("https://reqres.in/api/users", {
 		debug: true,
 	});
 	for await (const response of request.stream()) {

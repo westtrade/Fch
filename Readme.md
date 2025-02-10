@@ -28,16 +28,16 @@ yarn add fch
 ### Basic GET Request
 
 ```ts
-import Fch from "fch";
+import { fch } from "fch";
 
-const api = new Fch("https://api.example.com/data", { timeout: 3000 });
-const response = await api.get();
+const api = fch("https://api.example.com/data", { timeout: 3000 });
+const response = await api;
 ```
 
 ### POST with JSON Body
 
 ```ts
-const api = new Fch("https://api.example.com/users").setJsonBody({
+const api = fch("https://api.example.com/users").setJsonBody({
 	name: "Alice",
 	role: "admin",
 });
@@ -48,7 +48,7 @@ const [data, response] = await api.json();
 ### Advanced Configuration
 
 ```ts
-const api = new Fch("https://api.example.com", {
+const api = fch("https://api.example.com", {
 	retries: 3,
 	retryTimeout: 1000,
 	headers: { "X-Custom-Header": "value" },
