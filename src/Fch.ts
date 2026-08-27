@@ -1,216 +1,323 @@
 /**
+ * Logger interface for handling log messages.
+ *
+ * @public
+ * @typedef {Object} Logger
+ */
+export interface Logger {
+	/** Logs informational messages. */
+	info(...args: unknown[]): void;
+	/** Logs warning messages. */
+	warn(...args: unknown[]): void;
+	/** Logs error messages. */
+	error(...args: unknown[]): void;
+	/** Logs debug messages (only emitted when `debug: true`). */
+	debug?(...args: unknown[]): void;
+}
+
+/**
+ * Supported HTTP methods.
+ * @public
+ */
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
+
+/**
  * Configuration options for fetch requests, extending standard RequestInit.
+ *
+ * @public
  * @typedef {Object} FetchRequestOptions
  * @extends RequestInit
- * @property {number} [retries=1] - Number of retry attempts for failed requests.
- * @property {number} [retryTimeout=0] - Delay (ms) between retry attempts.
- * @property {number} [timeout=5000] - Request timeout in milliseconds.
- * @property {AbortController} [abortController] - Custom AbortController instance.
- * @property {Logger} [logger] - Logger implementation for request logging.
+ *
+ * @property {number}          [retries=0]         - Number of retry attempts after the initial request.
+ *                                                   `retries=1` means 1 initial + 1 retry = 2 total attempts.
+ * @property {number}          [retryDelay=1000]   - Base delay (ms) between retry attempts.
+ *                                                   Used with exponential backoff (`base * 2^(attempt-1)`).
+ * @property {number}          [maxRetryDelay=30000] - Cap for exponential retry delay (ms).
+ * @property {number}          [timeout=30000]     - Request timeout in milliseconds.
+ * @property {AbortSignal}     [signal]            - External AbortSignal. Combined with internal
+ *                                                   timeout and master abort controller.
+ * @property {Logger}          [logger]            - Logger implementation for request logging.
+ * @property {boolean}         [debug=false]       - Enable debug-level logging.
+ * @property {boolean}         [dedupe=false]      - Enable instance-level in-flight deduplication
+ *                                                   for concurrent identical requests.
+ * @property {string|Function} [dedupeKey]         - Explicit idempotency key for mutating methods
+ *                                                   (POST/PUT/PATCH/DELETE). Sent as `Idempotency-Key` header.
+ *                                                   Can be a static string or a factory `() => string`.
+ * @property {Function}        [retryOn]           - Unified retry predicate called for both HTTP
+ *                                                   responses and network/timeout errors.
  */
 export interface FetchRequestOptions extends RequestInit {
 	retries?: number;
+	retryDelay?: number;
+	/** @deprecated Use `retryDelay`. */
 	retryTimeout?: number;
+	maxRetryDelay?: number;
 	timeout?: number;
+	/** @deprecated Use `signal` instead. */
 	abortController?: AbortController;
 	logger?: Logger;
 	debug?: boolean;
+	dedupe?: boolean;
+	dedupeKey?: string | (() => string);
+	/** @deprecated Alias for `dedupeKey`. */
+	idempotencyKey?: string | (() => string);
+	retryOn?: (
+		response: Response | null,
+		error: unknown | null,
+		attempt: number
+	) => boolean;
 }
 
-/**
- * Logger interface for handling log messages.
- * @typedef {Object} Logger
- * @property {function(string): void} info - Logs informational messages.
- * @property {function(string): void} warn - Logs warning messages.
- * @property {function(string): void} error - Logs error messages.
- */
-export interface Logger {
-	info(message: string): void;
-	warn(message: string): void;
-	error(message: string): void;
-}
+const SAFE_METHODS = new Set<HttpMethod>(['GET', 'HEAD', 'OPTIONS']);
+const MUTATING_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
  * Enhanced fetch client extending URL with advanced request handling capabilities.
- * Supports retries, timeouts, interceptors, logging, and various data formats.
+ * Supports retries, timeouts, interceptors, logging, deduplication, and various data formats.
+ *
+ * **Core contract:** Every call to `await`, `.then()`, `.catch()`, `.finally()`, `.json()`, etc.
+ * initiates a NEW independent HTTP request. The instance is a reusable request *builder*, not a
+ * cached promise.
  *
  * @class Fch
  * @extends URL
  *
  * @example
  * const api = new Fch('https://api.example.com', { timeout: 3000 });
- * api.setHeaders({ 'Content-Type': 'application/json' }).get();
+ * const [users, response] = await api.setAuthToken(token).json();
  */
 export class Fch extends URL {
-	// Properties documentation
+	// ============================================================
+	// Public state (kept for backward compatibility with original API)
+	// ============================================================
 
 	/**
-	 * FormData payload for the request
+	 * FormData payload for the request.
 	 * @type {FormData|null}
 	 */
 	formData: FormData | null = null;
 
 	/**
-	 * Request headers instance
+	 * Request headers instance.
 	 * @type {Headers}
 	 */
 	headers: Headers;
 
 	/**
-	 * Number of remaining retry attempts
-	 * @type {number}
+	 * Internal fetch options passed to the underlying `fetch()` call.
+	 * @type {RequestInit}
 	 */
 	fetchOptions: RequestInit;
+
+	/**
+	 * External AbortController.
+	 * @deprecated Prefer using `signal` option and `abort()` method.
+	 * @type {AbortController}
+	 */
 	controller: AbortController;
-	timeoutController: AbortController;
+
+	/** Number of retry attempts (1-based meaning: retries=1 → 2 total attempts). */
 	retries: number;
-	retryTimeout: number;
+	/** Base delay between retries (ms). */
+	retryDelay: number;
+	/** Request timeout (ms). */
 	timeout: number;
 
-	private logger: Logger;
-	private isLoggingEnabled = true;
+	// ============================================================
+	// Private state
+	// ============================================================
 
-	private requestInterceptors: ((request: Fch) => void)[] = [];
+	private logger: Logger;
+	private debug = false;
+	private dedupe = false;
+	private dedupeKey: string | (() => string) | null = null;
+	private maxRetryDelay = 30000;
+	private externalSignal?: AbortSignal;
+
+	private retryOn?: (
+		response: Response | null,
+		error: unknown | null,
+		attempt: number
+	) => boolean;
+
+	private requestInterceptors: ((request: Fch) => void | Promise<void>)[] = [];
 	private responseInterceptors: ((
 		response: Response
 	) => Response | Promise<Response>)[] = [];
 
-	/**
-	 * Add request interceptor
-	 * @param {function(Fch): void} interceptor - Interceptor function
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.addRequestInterceptor((request) => {
-	 *     request.setHeader('X-Custom-Header', 'value');
-	 * });
-	 */
-	addRequestInterceptor(interceptor: (request: Fch) => void) {
-		this.requestInterceptors.push(interceptor);
-		return this;
-	}
+	/** Instance-level in-flight cache (isolated per instance). */
+	private inFlight = new Map<string, Promise<Response>>();
 
-	addResponseInterceptor(
-		interceptor: (response: Response) => Response | Promise<Response>
-	) {
-		this.responseInterceptors.push(interceptor);
-		return this;
-	}
+	/** Master controller: aborts in-flight requests AND pending retry delays. */
+	private masterController = new AbortController();
+
+	// ============================================================
+	// Constructor
+	// ============================================================
 
 	/**
+	 * Creates a new Fch instance.
+	 *
 	 * @constructor
-	 * @param {string|URL} url - Base URL for the request
-	 * @param {FetchRequestOptions} [options] - Configuration options
+	 * @param {string|URL} url - Base URL for the request.
+	 * @param {FetchRequestOptions} [options] - Configuration options.
+	 * @throws {TypeError} If the URL is invalid.
+	 *
+	 * @example
+	 * const api = new Fch('https://api.example.com', {
+	 *   timeout: 5000,
+	 *   retries: 2,
+	 *   retryDelay: 1000,
+	 *   debug: true,
+	 * });
 	 */
 	constructor(
 		url: string | URL,
 		{
-			retries = 1,
-			timeout = 5000,
+			retries = 0,
+			timeout = 30000,
+			retryDelay,
+			retryTimeout,
+			maxRetryDelay = 30000,
 			abortController,
-			retryTimeout = 0,
+			signal,
 			logger,
 			debug = false,
+			dedupe = false,
+			dedupeKey,
+			idempotencyKey,
+			retryOn,
 			headers,
 			...options
 		}: FetchRequestOptions = {}
 	) {
-		super(url); // передаем базовый URL в конструктор родительского класса URL
+		super(url.toString());
 
 		this.headers = new Headers(headers);
 		this.fetchOptions = {
 			...options,
-			method: options.method || "GET",
-			body: this.formData,
+			method: options.method || 'GET',
 		};
 
 		this.retries = retries;
-		this.retryTimeout = retryTimeout;
+		this.retryDelay = retryDelay ?? retryTimeout ?? 1000;
+		this.maxRetryDelay = maxRetryDelay;
 		this.timeout = timeout;
 		this.controller = abortController || new AbortController();
-		this.timeoutController = new AbortController();
-		this.fetchOptions.signal = this.controller.signal;
-		this.logger = this.adaptLogger(logger);
-		this.isLoggingEnabled = debug;
-	}
+		this.externalSignal = signal ?? this.controller.signal;
 
-	private adaptLogger(logger?: Logger): Logger {
-		return logger &&
-			typeof logger.info === "function" &&
-			typeof logger.warn === "function" &&
-			typeof logger.error === "function"
-			? logger
-			: this.createDefaultLogger();
+		this.logger = logger ?? this.createDefaultLogger();
+		this.debug = debug;
+		this.dedupe = dedupe;
+		this.dedupeKey = dedupeKey ?? idempotencyKey ?? null;
+		this.retryOn = retryOn;
 	}
 
 	private createDefaultLogger(): Logger {
 		return {
-			info: console.log.bind(console, "[INFO]"),
-			warn: console.warn.bind(console, "[WARN]"),
-			error: console.error.bind(console, "[ERROR]"),
+			info: console.log.bind(console, '[INFO]'),
+			warn: console.warn.bind(console, '[WARN]'),
+			error: console.error.bind(console, '[ERROR]'),
+			debug: console.debug.bind(console, '[DEBUG]'),
 		};
 	}
 
-	get aborted() {
-		return this.controller.signal.aborted;
+	// ============================================================
+	// Logging
+	// ============================================================
+
+	/**
+	 * Whether the master abort signal has fired.
+	 * @returns {boolean}
+	 */
+	get aborted(): boolean {
+		return this.masterController.signal.aborted;
 	}
 
-	enableLogging() {
-		this.isLoggingEnabled = true;
+	/**
+	 * Enable debug-level logging.
+	 * @returns {Fch} Current instance for chaining.
+	 * @example
+	 * api.enableLogging();
+	 */
+	enableLogging(): this {
+		this.debug = true;
 		return this;
 	}
 
-	disableLogging() {
-		this.isLoggingEnabled = false;
+	/**
+	 * Disable debug-level logging.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	disableLogging(): this {
+		this.debug = false;
 		return this;
 	}
 
-	setLogger(logger: Logger) {
+	/**
+	 * Replace the logger implementation.
+	 * @param {Logger} logger - New logger.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	setLogger(logger: Logger): this {
 		this.logger = logger;
 		return this;
 	}
 
+	/**
+	 * Returns a debug-aware logger wrapper. All methods check `this.debug` before emitting.
+	 * @returns {Logger} Wrapped logger.
+	 */
 	getLogger(): Logger {
+		const log = (level: keyof Logger, ...args: unknown[]) => {
+			if (!this.debug) return;
+			const fn = this.logger[level];
+			if (typeof fn === 'function') (fn as (...a: unknown[]) => void)(...args);
+		};
 		return {
-			info: (...args) => {
-				if (this.isLoggingEnabled) {
-					this.logger.info(...args);
-				}
-			},
-			warn: (...args) => {
-				if (this.isLoggingEnabled) {
-					this.logger.warn(...args);
-				}
-			},
-			error: (...args) => {
-				if (this.isLoggingEnabled) {
-					this.logger.error(...args);
-				}
-			},
+			info: (...args) => log('info', ...args),
+			warn: (...args) => log('warn', ...args),
+			error: (...args) => log('error', ...args),
+			debug: (...args) => log('debug', ...args),
 		};
 	}
 
+	private log(level: keyof Logger, ...args: unknown[]) {
+		if (this.debug) {
+			const fn = this.logger[level];
+			if (typeof fn === 'function') (fn as (...a: unknown[]) => void)(...args);
+		}
+	}
+
+	// ============================================================
+	// URL / search params
+	// ============================================================
+
 	/**
-	 * Set search params for the request
-	 * @param {Record<string, string>} params - Key/value pairs of search params
-	 * @returns {Fch} Current instance for chaining
+	 * Set (replace) search params for the request.
+	 * @param {Record<string, string|number|boolean>} params - Key/value pairs.
+	 * @returns {Fch} Current instance for chaining.
+	 *
 	 * @example
-	 * api.setSearchParams({ key: 'value' });
+	 * api.setSearchParams({ key: 'value', page: 1 });
 	 */
-	setSearchParams(params: Record<string, string>) {
+	setSearchParams(params: Record<string, string | number | boolean>): this {
 		for (const [key, value] of Object.entries(params)) {
-			this.searchParams.set(key, value);
+			this.searchParams.set(key, String(value));
 		}
 		return this;
 	}
 
 	/**
-	 * Append search params for the request
-	 * @param {Record<string, string | string[]>} params - Key/value pairs of search params
-	 * @returns {Fch} Current instance for chaining
+	 * Append search params. Arrays produce multiple entries for the same key.
+	 * @param {Record<string, string|string[]>} params - Key/value pairs.
+	 * @returns {Fch} Current instance for chaining.
+	 *
 	 * @example
-	 * api.appendSearchParams({ key: 'value' });
+	 * api.appendSearchParams({ tag: ['a', 'b'], q: 'hello' });
+	 * // -> ?tag=a&tag=b&q=hello
 	 */
-	appendSearchParams(params: Record<string, string | string[]>) {
+	appendSearchParams(params: Record<string, string | string[]>): this {
 		for (const [key, value] of Object.entries(params)) {
 			if (Array.isArray(value)) {
 				value.forEach((v) => this.searchParams.append(key, v));
@@ -221,50 +328,117 @@ export class Fch extends URL {
 		return this;
 	}
 
+	// ============================================================
+	// Body helpers
+	// ============================================================
+
 	/**
-	 * Append data to FormData
-	 * @param {string} key - Key
-	 * @param {string | Blob} value - Value
-	 * @returns {Fch} Current instance for chaining
+	 * Append data to FormData. Creates FormData on first call.
+	 * Switches method to POST unless already PUT.
+	 * Content-Type (multipart/form-data with boundary) is set automatically by the browser.
+	 *
+	 * @param {string} key - Key.
+	 * @param {string|Blob} value - Value.
+	 * @returns {Fch} Current instance for chaining.
+	 *
 	 * @example
-	 * api.appendToFormData('key', 'value');
+	 * api.appendToFormData('file', fileBlob);
 	 */
-	appendToFormData(key: string, value: string | Blob) {
-		if (!this.formData) {
-			this.formData = new FormData();
-		}
+	appendToFormData(key: string, value: string | Blob): this {
+		if (!this.formData) this.formData = new FormData();
 		this.formData.append(key, value);
-		if (this.fetchOptions.method !== "PUT") {
-			this.fetchOptions.method = "POST";
-		}
+		this.fetchOptions.body = this.formData;
+		this.headers.delete('Content-Type');
+		if (this.fetchOptions.method !== 'PUT') this.fetchOptions.method = 'POST';
 		return this;
 	}
 
 	/**
-	 * Set FormData for the request
-	 * @param {FormData} formData - FormData
-	 * @returns {Fch} Current instance for chaining
+	 * Set FormData directly.
+	 * @param {FormData} formData - FormData instance.
+	 * @returns {Fch} Current instance for chaining.
+	 *
 	 * @example
-	 * const formData = new FormData();
-	 * formData.append('key', 'value');
-	 * api.setFormData(formData);
+	 * const fd = new FormData(); fd.append('key', 'value');
+	 * api.setFormData(fd);
 	 */
-	setFormData(formData: FormData) {
+	setFormData(formData: FormData): this {
 		this.formData = formData;
-		if (this.fetchOptions.method !== "PUT") {
-			this.fetchOptions.method = "POST";
-		}
 		this.fetchOptions.body = formData;
-
+		this.headers.delete('Content-Type');
+		if (this.fetchOptions.method !== 'PUT') this.fetchOptions.method = 'POST';
 		return this;
 	}
 
 	/**
-	 * Set multiple headers at once
-	 * @param {Record<string, string>} headers - Key/value pairs of headers
-	 * @returns {Fch} Current instance for chaining
+	 * Set raw request body. Clears any existing FormData.
+	 *
+	 * @param {string|ArrayBuffer|Blob|FormData|URLSearchParams|ReadableStream|null} body - Request body.
+	 * @param {string} [contentType] - Optional Content-Type header.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.setBody('{"key":"value"}', 'application/json');
 	 */
-	setHeaders(headers: Record<string, string>) {
+	setBody(body: BodyInit | null, contentType?: string): this {
+		this.formData = null;
+		this.fetchOptions.body = body;
+		if (contentType) {
+			this.headers.set('Content-Type', contentType);
+		} else {
+			this.headers.delete('Content-Type');
+		}
+		return this;
+	}
+
+	/**
+	 * Set `application/x-www-form-urlencoded` body. Arrays produce multiple entries.
+	 *
+	 * @param {Record<string, string|number|boolean|Array<string|number|boolean>>} data - Data to encode.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.setFormUrlEncodedBody({ username: 'user', tags: ['a', 'b'] });
+	 */
+	setFormUrlEncodedBody(
+		data: Record<string, string | number | boolean | Array<string | number | boolean>>
+	): this {
+		const urlSearchParams = new URLSearchParams();
+		for (const [key, value] of Object.entries(data)) {
+			if (Array.isArray(value)) {
+				for (const v of value) urlSearchParams.append(key, String(v));
+			} else {
+				urlSearchParams.append(key, String(value));
+			}
+		}
+		return this.setBody(urlSearchParams, 'application/x-www-form-urlencoded');
+	}
+
+	/**
+	 * Set JSON request body with `Content-Type: application/json`.
+	 *
+	 * @template T
+	 * @param {T} json - JSON-serializable object.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.setJsonBody({ name: 'Alice', age: 30 });
+	 */
+	setJsonBody<T>(json: T): this {
+		return this.setBody(JSON.stringify(json), 'application/json');
+	}
+
+	// ============================================================
+	// Headers
+	// ============================================================
+
+	/**
+	 * Set multiple headers. Merges with existing headers (does NOT replace).
+	 *
+	 * @param {Record<string, string>} headers - Key/value pairs.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	setHeaders(headers: Record<string, string>): this {
 		for (const [key, value] of Object.entries(headers)) {
 			this.headers.set(key, value);
 		}
@@ -272,31 +446,110 @@ export class Fch extends URL {
 	}
 
 	/**
-	 * Set HTTP method for the request
-	 * @param {string} method - HTTP method
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.setMethod('POST');
+	 * Set a single header.
+	 * @param {string} name - Header name.
+	 * @param {string} value - Header value.
+	 * @returns {Fch} Current instance for chaining.
 	 */
-	setMethod(method: string) {
-		this.fetchOptions.method = method.toUpperCase();
+	setHeader(name: string, value: string): this {
+		this.headers.set(name, value);
 		return this;
 	}
 
 	/**
-	 * Set fetch options
-	 * @param {RequestInit} options - Fetch options
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.setFetchOptions({ method: 'POST' });
+	 * Get header value by name.
+	 * @param {string} name - Header name.
+	 * @returns {string|null} Header value or null if absent.
 	 */
-	setFetchOptions(options: RequestInit) {
-		this.fetchOptions = { ...this.fetchOptions, ...options };
+	getHeader(name: string): string | null {
+		return this.headers.get(name);
+	}
+
+	/**
+	 * Delete a header by name.
+	 * @param {string} name - Header name.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	deleteHeader(name: string): this {
+		this.headers.delete(name);
 		return this;
 	}
 
-	get method() {
-		return this.fetchOptions.method || "GET";
+	/**
+	 * Set Authorization header with a Bearer token.
+	 * @param {string} token - Bearer token.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.setAuthToken('my-jwt-token');
+	 */
+	setAuthToken(token: string): this {
+		this.headers.set('Authorization', `Bearer ${token}`);
+		return this;
+	}
+
+	/**
+	 * Set Authorization header with Basic auth (base64).
+	 * @param {string} username - Username.
+	 * @param {string} password - Password.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.setBasicAuth('user', 'pass');
+	 */
+	setBasicAuth(username: string, password: string): this {
+		const auth = btoa(`${username}:${password}`);
+		this.headers.set('Authorization', `Basic ${auth}`);
+		return this;
+	}
+
+	/**
+	 * Set explicit dedupe/idempotency key for mutating methods.
+	 * - Sent as `Idempotency-Key` header on POST/PUT/PATCH/DELETE.
+	 * - Used as dedupe identity when `dedupe: true`.
+	 *
+	 * Accepts a static string or a factory function (called per request).
+	 *
+	 * @param {string|Function} key - Key or factory.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.setDedupeKey(() => crypto.randomUUID());
+	 */
+	setDedupeKey(key: string | (() => string)): this {
+		this.dedupeKey = key;
+		return this;
+	}
+
+	/** @deprecated Use `setDedupeKey`. */
+	setIdempotencyKey(key: string | (() => string)): this {
+		return this.setDedupeKey(key);
+	}
+
+	// ============================================================
+	// Fetch options
+	// ============================================================
+
+	/**
+	 * Set HTTP method.
+	 * @param {string} method - HTTP method (case-insensitive).
+	 * @returns {Fch} Current instance for chaining.
+	 * @throws {TypeError} If method is not a recognized HTTP method.
+	 *
+	 * @example
+	 * api.setMethod('POST');
+	 */
+	setMethod(method: string): this {
+		const normalized = method.toUpperCase();
+		if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(normalized)) {
+			throw new TypeError(`Unsupported HTTP method: ${method}`);
+		}
+		this.fetchOptions.method = normalized;
+		return this;
+	}
+
+	get method(): string {
+		return (this.fetchOptions.method as string) || 'GET';
 	}
 
 	set method(value: string) {
@@ -304,341 +557,573 @@ export class Fch extends URL {
 	}
 
 	/**
-	 * Set request timeout
-	 * @param {number} timeout - Timeout in milliseconds
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.setTimeout(3000);
-	 */
-	setTimeout(timeout: number) {
-		this.timeout = timeout;
-		return this;
-	}
-
-	/**
-	 * Set number of retries for the request
-	 * @param {number} retries - Number of retries
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.setRetries(3);
-	 */
-	setRetries(retries: number) {
-		this.retries = retries;
-		return this;
-	}
-
-	/**
-	 * Set Authorization header with Bearer token
-	 * @param {string} token - Bearer token
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.setAuthToken('my-token');
-	 */
-	setAuthToken(token: string) {
-		this.headers.set("Authorization", `Bearer ${token}`);
-		return this;
-	}
-
-	/**
-	 * Set Authorization header with Basic auth
-	 * @param {string} username - Username
-	 * @param {string} password - Password
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.setBasicAuth('user', 'pass');
-	 */
-	setBasicAuth(username: string, password: string) {
-		const auth = btoa(`${username}:${password}`);
-		this.headers.set("Authorization", `Basic ${auth}`);
-		return this;
-	}
-
-	/**
-	 * Set CORS mode for the request
-	 * @param {RequestMode} mode - CORS mode
-	 * @returns {Fch} Current instance for chaining
+	 * Set CORS mode.
+	 * @param {RequestMode} mode - CORS mode (`cors`, `no-cors`, `same-origin`, `navigate`).
+	 * @returns {Fch} Current instance for chaining.
+	 *
 	 * @example
 	 * api.setCORS('cors');
 	 */
-	setCORS(mode: RequestMode) {
+	setCORS(mode: RequestMode): this {
 		this.fetchOptions.mode = mode;
 		return this;
 	}
 
 	/**
-	 * Disable cache for the request
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.disableCache();
+	 * Disable cache (sets `cache: 'no-store'`).
+	 * @returns {Fch} Current instance for chaining.
 	 */
-	disableCache() {
-		this.fetchOptions.cache = "no-store";
+	disableCache(): this {
+		this.fetchOptions.cache = 'no-store';
 		return this;
 	}
 
 	/**
-	 * Set request body
-	 * @param {string | Blob | null} body - Request body
-	 * @param {string} [contentType] - Content-Type header
-	 * @returns {Fch} Current instance for chaining
+	 * Replace the entire `RequestInit` options. Merges with existing.
+	 * @param {RequestInit} options - Fetch options.
+	 * @returns {Fch} Current instance for chaining.
+	 *
 	 * @example
-	 * api.setBody('{"key": "value"}', 'application/json');
+	 * api.setFetchOptions({ credentials: 'include' });
 	 */
-	setBody(body: string | ArrayBuffer | Blob | null, contentType?: string) {
-		this.formData = null;
-		this.fetchOptions.body = body;
-		if (contentType) {
-			this.headers.set("Content-Type", contentType);
-		}
+	setFetchOptions(options: RequestInit): this {
+		this.fetchOptions = { ...this.fetchOptions, ...options };
 		return this;
 	}
 
 	/**
-	 * Set form-urlencoded request body with proper Content-Type
-	 * @param {Record<string, string | number | boolean | (string | number | boolean)[]>} data - Data to be encoded
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.setFormUrlEncodedBody({ username: 'user', password: 'pass' });
+	 * Set request timeout (ms).
+	 * @param {number} timeout - Timeout in milliseconds (>= 0).
+	 * @returns {Fch} Current instance for chaining.
+	 * @throws {Error} If value is invalid.
 	 */
-	setFormUrlEncodedBody(
-		data: Record<
-			string,
-			string | number | boolean | (string | number | boolean)[]
-		>
-	) {
-		const urlSearchParams = new URLSearchParams();
-		for (const [key, value] of Object.entries(data)) {
-			if (Array.isArray(value)) {
-				for (const v of value) {
-					urlSearchParams.append(key, String(v));
-				}
-			} else {
-				urlSearchParams.append(key, String(value));
-			}
-		}
-		this.setBody(
-			urlSearchParams.toString(),
-			"application/x-www-form-urlencoded"
-		);
+	setTimeout(timeout: number): this {
+		if (!Number.isFinite(timeout) || timeout < 0) throw new Error(`Invalid timeout: ${timeout}`);
+		this.timeout = timeout;
 		return this;
 	}
 
 	/**
-	 * Set JSON request body with proper Content-Type
-	 * @template T
-	 * @param {Record<string, T>} json - JSON-serializable object
-	 * @returns {Fch} Current instance for chaining
+	 * Set number of retries (after the initial attempt).
+	 *
+	 * `retries=1` → 2 total attempts. `retries=3` → 4 total attempts.
+	 *
+	 * @param {number} retries - Number of retries (>= 0).
+	 * @returns {Fch} Current instance for chaining.
+	 * @throws {Error} If value is invalid.
 	 */
-	setJsonBody<T>(json: T) {
-		return this.setBody(JSON.stringify(json), "application/json");
-	}
-
-	/**
-	 * Get header value by name
-	 * @param {string} name - Header name
-	 * @returns {string | null} Header value
-	 * @example
-	 * const headerValue = api.getHeader('Content-Type');
-	 */
-	getHeader(name: string) {
-		return this.headers.get(name);
-	}
-
-	/**
-	 * Delete header by name
-	 * @param {string} name - Header name
-	 * @returns {Fch} Current instance for chaining
-	 * @example
-	 * api.deleteHeader('Content-Type');
-	 */
-	deleteHeader(name: string) {
-		this.headers.delete(name);
+	setRetries(retries: number): this {
+		if (!Number.isInteger(retries) || retries < 0) throw new Error(`Invalid retries: ${retries}`);
+		this.retries = retries;
 		return this;
 	}
 
 	/**
-	 * Execute the configured request with retry logic
-	 * @param {number} [retries] - Override default retry count
-	 * @param {number} [retryTimeout] - Override default retry delay
-	 * @returns {Promise<Response>} Fetch response promise
-	 * @throws {Error} When request fails after all retries
+	 * Set base delay between retries (ms). Used with exponential backoff.
+	 * @param {number} ms - Base delay (>= 0).
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	setRetryDelay(ms: number): this {
+		if (!Number.isFinite(ms) || ms < 0) throw new Error(`Invalid retryDelay: ${ms}`);
+		this.retryDelay = ms;
+		return this;
+	}
+
+	/** @deprecated Use `setRetryDelay`. */
+	setRetryTimeout(ms: number): this {
+		return this.setRetryDelay(ms);
+	}
+
+	/**
+	 * Set cap for exponential retry delay (ms).
+	 * @param {number} ms - Maximum delay.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	setMaxRetryDelay(ms: number): this {
+		if (!Number.isFinite(ms) || ms < 0) throw new Error(`Invalid maxRetryDelay: ${ms}`);
+		this.maxRetryDelay = ms;
+		return this;
+	}
+
+	/**
+	 * Unified retry predicate. Called for both HTTP responses and network/timeout errors.
+	 *
+	 * - For HTTP errors: `response` is set, `error` is null.
+	 * - For network/timeout errors: `response` is null, `error` is set.
+	 * - `attempt` is 1-based (1, 2, 3, ...).
+	 *
+	 * Return `true` to retry, `false` to stop.
+	 *
+	 * @param {(response: Response|null, error: unknown|null, attempt: number) => boolean} fn - Predicate.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.setRetryOn((response, error, attempt) => {
+	 *   if (response) return response.status === 429 || response.status >= 500;
+	 *   if (error instanceof DOMException && error.name === 'AbortError') return false;
+	 *   return attempt < 3;
+	 * });
+	 */
+	setRetryOn(fn: (response: Response | null, error: unknown | null, attempt: number) => boolean): this {
+		this.retryOn = fn;
+		return this;
+	}
+
+	// ============================================================
+	// Interceptors
+	// ============================================================
+
+	/**
+	 * Add a request interceptor. Runs before every attempt (including retries).
+	 * May mutate the Fch instance (headers, URL, body).
+	 *
+	 * @param {(request: Fch) => void|Promise<void>} interceptor - Interceptor function.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.addRequestInterceptor((req) => {
+	 *   req.setHeader('X-Request-Id', crypto.randomUUID());
+	 * });
+	 */
+	addRequestInterceptor(interceptor: (request: Fch) => void | Promise<void>): this {
+		this.requestInterceptors.push(interceptor);
+		return this;
+	}
+
+	/**
+	 * Add a response interceptor. Applied before the response is returned.
+	 * Must NOT consume the response body (use `response.clone()` if needed).
+	 *
+	 * @param {(response: Response) => Response|Promise<Response>} interceptor - Interceptor.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * api.addResponseInterceptor(async (res) => {
+	 *   if (res.status === 401) throw new Error('Unauthorized');
+	 *   return res;
+	 * });
+	 */
+	addResponseInterceptor(
+		interceptor: (response: Response) => Response | Promise<Response>
+	): this {
+		this.responseInterceptors.push(interceptor);
+		return this;
+	}
+
+	// ============================================================
+	// Request execution
+	// ============================================================
+
+	/**
+	 * Execute the configured request with retry logic.
+	 *
+	 * Each call initiates a NEW independent request. Configuration is snapshotted at call time,
+	 * so subsequent mutations to the Fch instance do NOT affect in-flight requests.
+	 *
+	 * @param {number} [retries] - Override default retry count.
+	 * @param {number} [retryTimeout] - Override default retry delay (ms).
+	 * @returns {Promise<Response>} Fetch response.
+	 * @throws {Error} When request fails after all retries.
+	 * @throws {TypeError} When `retries > 0` and body is a ReadableStream.
 	 */
 	async makeRequest(
-		retries: number = this.retries || 1,
-		retryTimeout: number = this.retryTimeout
-	) {
-		this.logger.info(
-			`Making request to ${this.toString()} with method ${this.method}`
-		);
+		retries: number = this.retries,
+		retryTimeout: number = this.retryDelay
+	): Promise<Response> {
+		if (this.masterController.signal.aborted) {
+			throw this.masterController.signal.reason;
+		}
 
-		this.requestInterceptors.forEach((interceptor) => interceptor(this));
+		for (const interceptor of this.requestInterceptors) {
+			await interceptor(this);
+		}
 
-		const fetchWithTimeout = async () => {
-			const timeoutId = setTimeout(
-				() => this.controller.abort(),
-				this.timeout
-			);
-
-			try {
-				const response = await fetch(this.toString(), {
-					...this.fetchOptions,
-					signal: this.controller.signal,
-				});
-				clearTimeout(timeoutId);
-
-				return this.responseInterceptors.reduce(
-					async (prev, interceptor) => interceptor(await prev),
-					response
-				);
-			} catch (error) {
-				clearTimeout(timeoutId);
-				throw error;
-			}
+		// SNAPSHOT configuration — protects against mutations during retry loop
+		const snapshot = {
+			method: (this.fetchOptions.method as string) || 'GET',
+			url: this.toString(),
+			headers: new Headers(this.headers),
+			body: this.fetchOptions.body ?? null,
+			fetchOptions: { ...this.fetchOptions },
 		};
 
-		for (let attempt = 0; attempt < retries; attempt++) {
-			if (attempt > 0 && retryTimeout > 0) {
-				await new Promise((resolve) =>
-					setTimeout(resolve, retryTimeout)
-				);
+		// Apply Idempotency-Key to snapshot headers (does not mutate this.headers)
+		this.applyIdempotencyKey(snapshot);
+
+		// Replayability check
+		if (retries > 0 && typeof ReadableStream !== 'undefined' && snapshot.body instanceof ReadableStream) {
+			throw new TypeError('Cannot retry requests with ReadableStream body. Set retries to 0.');
+		}
+
+		// Instance-level dedupe
+		const dedupeKey = this.resolveDedupeKey(snapshot);
+		if (dedupeKey !== null) {
+			const existing = this.inFlight.get(dedupeKey);
+			if (existing) {
+				this.log('debug', 'Deduped concurrent in-flight request:', dedupeKey);
+				return existing.then((r) => r.clone());
+			}
+		}
+
+		this.log('info', `Making request to ${snapshot.url} with method ${snapshot.method}`);
+
+		const requestPromise = (async () => {
+			const totalAttempts = retries + 1;
+			let lastError: unknown = null;
+
+			for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+				const timeoutController = new AbortController();
+				let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+				if (this.timeout > 0) {
+					timeoutId = setTimeout(() => {
+						timeoutController.abort(new DOMException('Request timeout', 'TimeoutError'));
+					}, this.timeout);
+				}
+
+				const combinedSignal = this.combineSignals(timeoutController.signal);
+
+				try {
+					const response = await fetch(snapshot.url, {
+						...snapshot.fetchOptions,
+						method: snapshot.method,
+						headers: snapshot.headers,
+						body: snapshot.body,
+						signal: combinedSignal,
+					});
+
+					if (timeoutId) clearTimeout(timeoutId);
+
+					// Retry policy for HTTP responses
+					const shouldRetry = this.retryOn
+						? this.retryOn(response, null, attempt)
+						: false;
+
+					if (shouldRetry && attempt < totalAttempts) {
+						this.log('warn', `Retry triggered for status ${response.status}`);
+						await this.sleepWithJitter(retryTimeout, attempt);
+						continue;
+					}
+
+					// Response interceptors
+					let processed = response;
+					for (const interceptor of this.responseInterceptors) {
+						processed = await interceptor(processed);
+					}
+
+					this.log('info', `Received response with status ${response.status}`);
+					return processed;
+				} catch (error) {
+					if (timeoutId) clearTimeout(timeoutId);
+
+					const isUserAbort =
+						error instanceof DOMException &&
+						(error.name === 'AbortError' || this.masterController.signal.aborted);
+
+					lastError = error;
+					const errMsg = error instanceof Error ? error.message : String(error);
+					this.log('error', `Request failed (attempt ${attempt}):`, errMsg);
+
+					if (isUserAbort) throw error;
+
+					// Unified retry policy for network/timeout errors
+					const shouldRetryError = this.retryOn
+						? this.retryOn(null, error, attempt)
+						: true;
+
+					if (shouldRetryError && attempt < totalAttempts) {
+						await this.sleepWithJitter(retryTimeout, attempt);
+						continue;
+					}
+
+					throw error;
+				}
 			}
 
+			throw lastError ?? new Error('Request failed');
+		})();
+
+		if (dedupeKey !== null) {
+			this.inFlight.set(dedupeKey, requestPromise);
 			try {
-				const response = await fetchWithTimeout();
-				this.logger.info(
-					`Received response with status ${response.status}`
-				);
-				return response;
-			} catch (error) {
-				this.logger.error(`Request failed: ${error.message}`);
-				if (attempt === retries - 1) throw error;
+				return await requestPromise;
+			} finally {
+				this.inFlight.delete(dedupeKey);
 			}
+		}
+
+		return requestPromise;
+	}
+
+	private resolveDedupeKey(snapshot: { method: string; url: string }): string | null {
+		if (!this.dedupe) return null;
+
+		if (SAFE_METHODS.has(snapshot.method as HttpMethod)) {
+			return `${snapshot.method}:${snapshot.url}`;
+		}
+		if (MUTATING_METHODS.has(snapshot.method as HttpMethod)) {
+			if (this.dedupeKey) {
+				return typeof this.dedupeKey === 'function' ? this.dedupeKey() : this.dedupeKey;
+			}
+			return null; // Mutating without explicit key — never dedupe
+		}
+		return null;
+	}
+
+	private applyIdempotencyKey(snapshot: { method: string; headers: Headers }): void {
+		if (!MUTATING_METHODS.has(snapshot.method as HttpMethod)) return;
+		if (snapshot.headers.has('Idempotency-Key')) return;
+
+		if (this.dedupeKey) {
+			const key = typeof this.dedupeKey === 'function' ? this.dedupeKey() : this.dedupeKey;
+			snapshot.headers.set('Idempotency-Key', key);
 		}
 	}
 
+	private sleepWithJitter(baseMs: number, attempt: number): Promise<void> {
+		const expDelay = baseMs * Math.pow(2, attempt - 1);
+		const cappedDelay = Math.min(this.maxRetryDelay, expDelay);
+		const jitter = cappedDelay * 0.2 * (Math.random() * 2 - 1);
+		const delay = Math.max(0, cappedDelay + jitter);
+
+		return new Promise<void>((resolve, reject) => {
+			if (this.masterController.signal.aborted) {
+				reject(this.masterController.signal.reason);
+				return;
+			}
+
+			const timer = setTimeout(() => {
+				this.masterController.signal.removeEventListener('abort', onAbort);
+				resolve();
+			}, delay);
+
+			const onAbort = () => {
+				clearTimeout(timer);
+				reject(this.masterController.signal.reason);
+			};
+
+			this.masterController.signal.addEventListener('abort', onAbort, { once: true });
+		});
+	}
+
+	private combineSignals(timeoutSignal: AbortSignal): AbortSignal {
+		const signals: AbortSignal[] = [this.masterController.signal, timeoutSignal];
+		if (this.externalSignal) signals.push(this.externalSignal);
+
+		// Modern runtimes
+		if (typeof AbortSignal !== 'undefined' && 'any' in AbortSignal) {
+			return (AbortSignal as unknown as { any: (s: AbortSignal[]) => AbortSignal }).any(signals);
+		}
+
+		// Fallback
+		const combined = new AbortController();
+		for (const s of signals) {
+			if (s.aborted) {
+				combined.abort(s.reason);
+				return combined.signal;
+			}
+			s.addEventListener('abort', () => combined.abort(s.reason), { once: true });
+		}
+		return combined.signal;
+	}
+
+	// ============================================================
+	// Thenable API — each call initiates a NEW request
+	// ============================================================
+
 	/**
-	 * Attaches callbacks for the resolution and/or rejection of the Promise.
-	 * @param {function} onFulfilled - Callback for fulfilled promise
-	 * @param {function} onRejected - Callback for rejected promise
-	 * @returns {Promise} Promise for chaining
+	 * Makes Fch thenable. **Every call initiates a NEW HTTP request.**
+	 * @param {Function} onFulfilled - Success callback.
+	 * @param {Function} [onRejected] - Error callback.
+	 * @returns {Promise} Promise for chaining.
 	 */
-	then(onFulfilled: (value: any) => any, onRejected?: (reason: any) => any) {
+	then<TResult1 = Response, TResult2 = never>(
+		onFulfilled?: ((value: Response) => TResult1 | PromiseLike<TResult1>) | null,
+		onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+	): Promise<TResult1 | TResult2> {
 		return this.makeRequest().then(onFulfilled, onRejected);
 	}
 
-	catch(onRejected: (reason: any) => any) {
-		this.logger.error("Caught an error during the request");
+	/**
+	 * **Every call initiates a NEW HTTP request.**
+	 * @param {Function} onRejected - Error callback.
+	 * @returns {Promise} Promise for chaining.
+	 */
+	catch<TResult = never>(
+		onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
+	): Promise<Response | TResult> {
+		this.log('error', 'Caught an error during the request');
 		return this.makeRequest().catch(onRejected);
 	}
 
-	finally(onFinally: () => void) {
+	/**
+	 * **Every call initiates a NEW HTTP request.**
+	 * @param {Function} onFinally - Cleanup callback.
+	 * @returns {Promise<Response>}
+	 */
+	finally(onFinally?: (() => void) | null): Promise<Response> {
 		return this.makeRequest().finally(onFinally);
 	}
 
-	toString() {
-		return super.toString();
-	}
+	// ============================================================
+	// Convenience methods (return [data, response] tuples)
+	// ============================================================
 
 	/**
-	 * Create request stream with delay between attempts
-	 * @param {number} [delay=300] - Delay between requests in milliseconds
-	 * @param {AbortController} [abortController] - Controller for stream termination
-	 * @yields {Promise<[Response|Error, AbortController]>} Response/error with controller
+	 * Execute request and parse body as JSON. Returns tuple `[data, response]`.
+	 *
+	 * @template T - Expected data type.
+	 * @returns {Promise<[T, Response]>} Tuple of parsed JSON and raw Response.
+	 * @throws {SyntaxError} If response is not valid JSON.
+	 *
+	 * @example
+	 * const [users, response] = await api.json<User[]>();
 	 */
-	json() {
+	json<T = unknown>(): Promise<[T, Response]> {
 		return this.makeRequest().then(async (response) => [
-			await response.json(),
+			(await response.json()) as T,
 			response,
 		]);
 	}
 
-	text() {
+	/**
+	 * Execute request and return body as string. Returns tuple `[text, response]`.
+	 * @returns {Promise<[string, Response]>}
+	 */
+	text(): Promise<[string, Response]> {
 		return this.makeRequest().then(async (response) => [
 			await response.text(),
 			response,
 		]);
 	}
 
-	blob() {
+	/**
+	 * Execute request and return body as Blob. Returns tuple `[blob, response]`.
+	 * @returns {Promise<[Blob, Response]>}
+	 */
+	blob(): Promise<[Blob, Response]> {
 		return this.makeRequest().then(async (response) => [
 			await response.blob(),
 			response,
 		]);
 	}
 
-	abort() {
-		this.controller.abort();
+	/**
+	 * Execute request and return raw Response (no tuple).
+	 * @returns {Promise<Response>}
+	 */
+	send(): Promise<Response> {
+		return this.makeRequest();
+	}
+
+	// ============================================================
+	// Abort / clone / poll
+	// ============================================================
+
+	/**
+	 * Abort ALL currently active HTTP requests AND pending retry delays for this instance.
+	 *
+	 * @param {unknown} [reason] - Abort reason.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * const req = fch('/api').setRetries(5);
+	 * req.send();
+	 * setTimeout(() => req.abort(), 100);
+	 */
+	abort(reason?: unknown): this {
+		this.masterController.abort(reason ?? new DOMException('User aborted', 'AbortError'));
+		this.controller.abort(reason);
+		return this;
 	}
 
 	/**
-	 * Create new instance with cloned configuration
-	 * @returns {Fch} New Fch instance with identical settings
+	 * Create a deep copy of this Fch instance with the same configuration.
+	 * Active controllers are NOT shared; the clone gets fresh abort state.
+	 *
+	 * @returns {Fch} New Fch instance.
 	 */
-	clone() {
+	clone(): Fch {
 		const clone = new Fch(this.toString(), { ...this.fetchOptions });
 		clone.setHeaders(Object.fromEntries(this.headers.entries()));
 		clone.setSearchParams(Object.fromEntries(this.searchParams.entries()));
 		clone.setTimeout(this.timeout);
 		clone.setRetries(this.retries);
-		clone.controller = new AbortController();
+		clone.setRetryDelay(this.retryDelay);
+		clone.setMaxRetryDelay(this.maxRetryDelay);
+		clone.debug = this.debug;
+		clone.dedupe = this.dedupe;
+		clone.dedupeKey = this.dedupeKey;
+		clone.retryOn = this.retryOn;
+		clone.logger = this.logger;
 		clone.requestInterceptors = [...this.requestInterceptors];
 		clone.responseInterceptors = [...this.responseInterceptors];
 
 		if (this.fetchOptions.body instanceof FormData) {
 			const formDataCopy = new FormData();
 			this.fetchOptions.body.forEach((value, key) =>
-				formDataCopy.append(key, value)
+				formDataCopy.append(key, value as string | Blob)
 			);
 			clone.setFormData(formDataCopy);
-		} else if (typeof this.fetchOptions.body === "string") {
+		} else if (typeof this.fetchOptions.body === 'string') {
 			clone.setBody(this.fetchOptions.body);
 		} else if (this.fetchOptions.body) {
-			console.warn("Cannot clone non-serializable body");
+			this.log('warn', 'Cannot clone non-serializable body');
 		}
 
 		return clone;
 	}
 
 	/**
-	 * Create request stream with delay between attempts
-	 * @param {number} [delay=300] - Delay between requests in milliseconds
-	 * @param {AbortController} [abortController] - Controller for stream termination
-	 * @yields {Promise<[Response|Error, AbortController]>} Response/error with controller
+	 * Create a long-polling async generator. Yields responses (or errors) indefinitely
+	 * until aborted or the controller fires.
+	 *
+	 * @param {number} [delay=300] - Delay between polls (ms).
+	 * @param {AbortController} [abortController] - Controller for termination.
+	 * @yields {Response|Error} Response or caught error.
+	 *
 	 * @example
-	 * const stream = api.stream(500);
+	 * const stream = api.poll(500);
 	 * for await (const response of stream) {
-	 *     console.log(response);
+	 *   console.log(response);
 	 * }
 	 */
-	async *poll(
-		delay = 300,
-		abortController: AbortController = this.controller
-	) {
-		while (!abortController.signal.aborted) {
+	async *poll(delay = 300, abortController: AbortController = this.controller): AsyncGenerator<Response | Error> {
+		while (!abortController.signal.aborted && !this.masterController.signal.aborted) {
 			try {
 				const response = await this.makeRequest();
 				yield response;
 			} catch (error) {
-				yield error;
+				yield error as Error;
 			}
 
-			if (abortController.signal.aborted) {
-				break;
-			}
+			if (abortController.signal.aborted || this.masterController.signal.aborted) break;
 
-			await new Promise((resolve) => setTimeout(resolve, delay));
+			await this.sleepWithJitter(delay, 1); // fixed delay for polling (no backoff)
 		}
+	}
+
+	toString(): string {
+		return super.toString();
 	}
 }
 
 /**
- * Static factory method for quick request creation
+ * Static factory for quick request creation.
+ *
  * @static
- * @param {string} url - Target URL
- * @param {FetchRequestOptions} [options] - Request configuration
- * @returns {Fch} New Fch instance
+ * @param {string|URL} url - Target URL.
+ * @param {FetchRequestOptions} [options] - Request configuration.
+ * @returns {Fch} New Fch instance.
+ *
+ * @example
+ * const [users, res] = await fch('https://api.example.com/users', {
+ *   timeout: 5000,
+ *   retries: 2,
+ *   dedupe: true,
+ * }).setAuthToken(token).json<User[]>();
  */
-export const fch = (url: string, options: FetchRequestOptions = {}): Fch => {
+export const fch = (url: string | URL, options: FetchRequestOptions = {}): Fch => {
 	return new Fch(url, options);
 };
 
