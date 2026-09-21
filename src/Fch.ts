@@ -134,6 +134,15 @@ export class Fch extends URL {
 	private maxRetryDelay = 30000;
 	private externalSignal?: AbortSignal;
 
+	/** User-supplied external signal. Never refreshed (unlike our own controller). */
+	private userSignal?: AbortSignal;
+
+	/** True when `abortController` was not supplied and we created the controller. */
+	private ownsController = true;
+
+	/** True when the last attempt failed because the per-attempt timeout fired. */
+	private timedOut = false;
+
 	private retryOn?: (
 		response: Response | null,
 		error: unknown | null,
@@ -196,7 +205,9 @@ export class Fch extends URL {
 		this.headers = new Headers(headers);
 		this.fetchOptions = {
 			...options,
-			method: options.method || 'GET',
+			// Normalize here so `{ method: 'post' }` behaves exactly like
+			// `setMethod('POST')` (idempotency/dedupe checks are case-sensitive).
+			method: (options.method ? String(options.method) : 'GET').toUpperCase(),
 		};
 
 		this.retries = retries;
@@ -204,13 +215,32 @@ export class Fch extends URL {
 		this.maxRetryDelay = maxRetryDelay;
 		this.timeout = timeout;
 		this.controller = abortController || new AbortController();
+		this.ownsController = !abortController;
+		this.userSignal = signal ?? undefined;
 		this.externalSignal = signal ?? this.controller.signal;
 
-		this.logger = logger ?? this.createDefaultLogger();
+		this.logger = this.adaptLogger(logger);
 		this.debug = debug;
 		this.dedupe = dedupe;
 		this.dedupeKey = dedupeKey ?? idempotencyKey ?? null;
 		this.retryOn = retryOn;
+	}
+
+	/**
+	 * Validate a caller-supplied logger, falling back to the default one when the
+	 * object does not implement the full interface. Without this check an invalid
+	 * logger (e.g. `{ info: 'nope' }`) is accepted and then silently swallows
+	 * every log line.
+	 */
+	private adaptLogger(logger?: Logger): Logger {
+		if (!logger) return this.createDefaultLogger();
+
+		const hasRequiredMethods =
+			typeof logger.info === 'function' &&
+			typeof logger.warn === 'function' &&
+			typeof logger.error === 'function';
+
+		return hasRequiredMethods ? logger : this.createDefaultLogger();
 	}
 
 	private createDefaultLogger(): Logger {
@@ -227,11 +257,12 @@ export class Fch extends URL {
 	// ============================================================
 
 	/**
-	 * Whether the master abort signal has fired.
+	 * Whether the request was aborted — either explicitly via {@link Fch.abort}
+	 * or because the per-attempt timeout fired.
 	 * @returns {boolean}
 	 */
 	get aborted(): boolean {
-		return this.masterController.signal.aborted;
+		return this.masterController.signal.aborted || this.timedOut;
 	}
 
 	/**
@@ -255,22 +286,24 @@ export class Fch extends URL {
 	}
 
 	/**
-	 * Replace the logger implementation.
+	 * Replace the logger implementation. The value is validated the same way as
+	 * the constructor option, so an incomplete logger cannot silently swallow logs.
 	 * @param {Logger} logger - New logger.
 	 * @returns {Fch} Current instance for chaining.
 	 */
 	setLogger(logger: Logger): this {
-		this.logger = logger;
+		this.logger = this.adaptLogger(logger);
 		return this;
 	}
 
 	/**
-	 * Returns a debug-aware logger wrapper. All methods check `this.debug` before emitting.
+	 * Returns a logger wrapper. `error` and `warn` always emit; `info` and `debug`
+	 * are suppressed unless debug logging is enabled.
 	 * @returns {Logger} Wrapped logger.
 	 */
 	getLogger(): Logger {
 		const log = (level: keyof Logger, ...args: unknown[]) => {
-			if (!this.debug) return;
+			if (!this.shouldLog(level)) return;
 			const fn = this.logger[level];
 			if (typeof fn === 'function') (fn as (...a: unknown[]) => void)(...args);
 		};
@@ -282,11 +315,19 @@ export class Fch extends URL {
 		};
 	}
 
+	/**
+	 * `error`/`warn` are always emitted — diagnostics must not depend on the
+	 * debug flag. `info`/`debug` are chatty and stay opt-in.
+	 */
+	private shouldLog(level: keyof Logger): boolean {
+		if (level === 'error' || level === 'warn') return true;
+		return this.debug;
+	}
+
 	private log(level: keyof Logger, ...args: unknown[]) {
-		if (this.debug) {
-			const fn = this.logger[level];
-			if (typeof fn === 'function') (fn as (...a: unknown[]) => void)(...args);
-		}
+		if (!this.shouldLog(level)) return;
+		const fn = this.logger[level];
+		if (typeof fn === 'function') (fn as (...a: unknown[]) => void)(...args);
 	}
 
 	// ============================================================
@@ -579,15 +620,29 @@ export class Fch extends URL {
 	}
 
 	/**
-	 * Replace the entire `RequestInit` options. Merges with existing.
+	 * Merge `RequestInit` options into the current configuration.
+	 *
+	 * Headers are special-cased: requests are sent with `this.headers`, so a
+	 * `headers` entry would otherwise be silently dropped. They are merged into
+	 * `this.headers` (consistent with {@link Fch.setHeaders}) instead.
+	 *
 	 * @param {RequestInit} options - Fetch options.
 	 * @returns {Fch} Current instance for chaining.
 	 *
 	 * @example
 	 * api.setFetchOptions({ credentials: 'include' });
+	 * api.setFetchOptions({ headers: { 'X-Trace-Id': 'abc' } });
 	 */
 	setFetchOptions(options: RequestInit): this {
-		this.fetchOptions = { ...this.fetchOptions, ...options };
+		const { headers, ...rest } = options;
+		this.fetchOptions = { ...this.fetchOptions, ...rest };
+
+		if (headers !== undefined) {
+			new Headers(headers).forEach((value, key) => {
+				this.headers.set(key, value);
+			});
+		}
+
 		return this;
 	}
 
@@ -730,58 +785,113 @@ export class Fch extends URL {
 		retries: number = this.retries,
 		retryTimeout: number = this.retryDelay
 	): Promise<Response> {
+		// `abort()` cancels in-flight work, but it must not leave the builder
+		// permanently unusable: start a fresh abort generation for this request.
 		if (this.masterController.signal.aborted) {
-			throw this.masterController.signal.reason;
+			this.masterController = new AbortController();
+			if (this.ownsController) this.controller = new AbortController();
+			this.externalSignal = this.userSignal ?? this.controller.signal;
 		}
 
-		for (const interceptor of this.requestInterceptors) {
-			await interceptor(this);
+		this.timedOut = false;
+
+		if (!Number.isInteger(retries) || retries < 0) {
+			throw new Error(`Invalid retries: ${retries}`);
 		}
 
-		// SNAPSHOT configuration — protects against mutations during retry loop
-		const snapshot = {
-			method: (this.fetchOptions.method as string) || 'GET',
-			url: this.toString(),
-			headers: new Headers(this.headers),
-			body: this.fetchOptions.body ?? null,
-			fetchOptions: { ...this.fetchOptions },
+		// Capture this request's abort generation. Concurrent requests on the
+		// same instance must not observe each other's controllers when one of
+		// them is aborted or when `abort()` later swaps in a new generation.
+		const master = this.masterController;
+		const external = this.externalSignal;
+
+		const totalAttempts = retries + 1;
+
+		// Dedupe identity is derived from the configuration at CALL time: request
+		// interceptors now run per attempt (below), so they cannot be part of an
+		// identity that must be known before the first attempt starts.
+		const callMethod = (this.fetchOptions.method as string) || 'GET';
+		const callUrl = this.toString();
+
+		// Resolve the idempotency/dedupe key AT MOST ONCE per request. A factory
+		// key must yield the same value for the `Idempotency-Key` header and for
+		// the dedupe identity, otherwise retries of one logical request would be
+		// sent with different keys.
+		let cachedKey: string | null | undefined;
+		const resolveKey = (): string | null => {
+			if (cachedKey === undefined) {
+				cachedKey = !this.dedupeKey
+					? null
+					: typeof this.dedupeKey === 'function'
+						? this.dedupeKey()
+						: this.dedupeKey;
+			}
+			return cachedKey;
 		};
 
-		// Apply Idempotency-Key to snapshot headers (does not mutate this.headers)
-		this.applyIdempotencyKey(snapshot);
+		const dedupeKey = this.resolveDedupeKey(callMethod, callUrl, resolveKey);
 
-		// Replayability check
-		if (retries > 0 && typeof ReadableStream !== 'undefined' && snapshot.body instanceof ReadableStream) {
-			throw new TypeError('Cannot retry requests with ReadableStream body. Set retries to 0.');
-		}
-
-		// Instance-level dedupe
-		const dedupeKey = this.resolveDedupeKey(snapshot);
 		if (dedupeKey !== null) {
 			const existing = this.inFlight.get(dedupeKey);
 			if (existing) {
 				this.log('debug', 'Deduped concurrent in-flight request:', dedupeKey);
-				return existing.then((r) => r.clone());
+				// Clone as soon as the shared response settles, so a late joiner
+				// can never race the first caller's body read.
+				return existing.then((response) => response.clone());
 			}
 		}
 
-		this.log('info', `Making request to ${snapshot.url} with method ${snapshot.method}`);
-
 		const requestPromise = (async () => {
-			const totalAttempts = retries + 1;
 			let lastError: unknown = null;
 
 			for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+				// Request interceptors run before EVERY attempt (including
+				// retries) so they can refresh credentials or request ids.
+				for (const interceptor of this.requestInterceptors) {
+					await interceptor(this);
+				}
+
+				// Per-attempt snapshot: isolates this attempt from later mutations
+				// (including those made by the next interceptor run).
+				const snapshot = {
+					method: (this.fetchOptions.method as string) || 'GET',
+					url: this.toString(),
+					headers: new Headers(this.headers),
+					body: this.fetchOptions.body ?? null,
+					fetchOptions: { ...this.fetchOptions },
+				};
+
+				// Apply Idempotency-Key to snapshot headers (does not mutate this.headers)
+				this.applyIdempotencyKey(snapshot, resolveKey());
+
+				// Replayability check — fatal only when a retry could follow.
+				if (
+					retries > 0 &&
+					typeof ReadableStream !== 'undefined' &&
+					snapshot.body instanceof ReadableStream
+				) {
+					throw new TypeError('Cannot retry requests with ReadableStream body. Set retries to 0.');
+				}
+
+				this.log('info', `Making request to ${snapshot.url} with method ${snapshot.method}`);
+
 				const timeoutController = new AbortController();
 				let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
+				// Per-attempt flag: classifying this attempt's error must not be
+				// influenced by a concurrent request on the same instance.
+				let attemptTimedOut = false;
+
+				this.timedOut = false;
 				if (this.timeout > 0) {
 					timeoutId = setTimeout(() => {
+						attemptTimedOut = true;
+						this.timedOut = true;
 						timeoutController.abort(new DOMException('Request timeout', 'TimeoutError'));
 					}, this.timeout);
 				}
 
-				const combinedSignal = this.combineSignals(timeoutController.signal);
+				const combinedSignal = this.combineSignals(timeoutController.signal, master, external);
 
 				try {
 					const response = await fetch(snapshot.url, {
@@ -793,6 +903,7 @@ export class Fch extends URL {
 					});
 
 					if (timeoutId) clearTimeout(timeoutId);
+					this.timedOut = false;
 
 					// Retry policy for HTTP responses
 					const shouldRetry = this.retryOn
@@ -801,7 +912,7 @@ export class Fch extends URL {
 
 					if (shouldRetry && attempt < totalAttempts) {
 						this.log('warn', `Retry triggered for status ${response.status}`);
-						await this.sleepWithJitter(retryTimeout, attempt);
+						await this.sleepWithJitter(retryTimeout, attempt, master);
 						continue;
 					}
 
@@ -816,9 +927,16 @@ export class Fch extends URL {
 				} catch (error) {
 					if (timeoutId) clearTimeout(timeoutId);
 
+					// A deliberate abort (master controller via `abort()`, an
+					// external signal, or a bare AbortError) must never be retried.
+					// A timeout is NOT a user abort — it falls through to the
+					// retry policy below.
 					const isUserAbort =
-						error instanceof DOMException &&
-						(error.name === 'AbortError' || this.masterController.signal.aborted);
+						master.signal.aborted ||
+						external?.aborted === true ||
+						(!attemptTimedOut &&
+							error instanceof DOMException &&
+							error.name === 'AbortError');
 
 					lastError = error;
 					const errMsg = error instanceof Error ? error.message : String(error);
@@ -832,7 +950,7 @@ export class Fch extends URL {
 						: true;
 
 					if (shouldRetryError && attempt < totalAttempts) {
-						await this.sleepWithJitter(retryTimeout, attempt);
+						await this.sleepWithJitter(retryTimeout, attempt, master);
 						continue;
 					}
 
@@ -846,7 +964,10 @@ export class Fch extends URL {
 		if (dedupeKey !== null) {
 			this.inFlight.set(dedupeKey, requestPromise);
 			try {
-				return await requestPromise;
+				// Hand the caller a clone; the shared response body stays unread,
+				// so late joiners can still clone it (reading it would make
+				// `clone()` throw "body already read").
+				return await requestPromise.then((response) => response.clone());
 			} finally {
 				this.inFlight.delete(dedupeKey);
 			}
@@ -855,60 +976,72 @@ export class Fch extends URL {
 		return requestPromise;
 	}
 
-	private resolveDedupeKey(snapshot: { method: string; url: string }): string | null {
+	private resolveDedupeKey(
+		method: string,
+		url: string,
+		resolveKey: () => string | null
+	): string | null {
 		if (!this.dedupe) return null;
 
-		if (SAFE_METHODS.has(snapshot.method as HttpMethod)) {
-			return `${snapshot.method}:${snapshot.url}`;
+		if (SAFE_METHODS.has(method as HttpMethod)) {
+			return `${method}:${url}`;
 		}
-		if (MUTATING_METHODS.has(snapshot.method as HttpMethod)) {
-			if (this.dedupeKey) {
-				return typeof this.dedupeKey === 'function' ? this.dedupeKey() : this.dedupeKey;
-			}
-			return null; // Mutating without explicit key — never dedupe
+		if (MUTATING_METHODS.has(method as HttpMethod)) {
+			// Mutating without an explicit key — never dedupe.
+			return resolveKey();
 		}
 		return null;
 	}
 
-	private applyIdempotencyKey(snapshot: { method: string; headers: Headers }): void {
+	private applyIdempotencyKey(
+		snapshot: { method: string; headers: Headers },
+		key: string | null
+	): void {
 		if (!MUTATING_METHODS.has(snapshot.method as HttpMethod)) return;
 		if (snapshot.headers.has('Idempotency-Key')) return;
 
-		if (this.dedupeKey) {
-			const key = typeof this.dedupeKey === 'function' ? this.dedupeKey() : this.dedupeKey;
+		if (key) {
 			snapshot.headers.set('Idempotency-Key', key);
 		}
 	}
 
-	private sleepWithJitter(baseMs: number, attempt: number): Promise<void> {
+	private sleepWithJitter(
+		baseMs: number,
+		attempt: number,
+		master: AbortController = this.masterController
+	): Promise<void> {
 		const expDelay = baseMs * Math.pow(2, attempt - 1);
 		const cappedDelay = Math.min(this.maxRetryDelay, expDelay);
 		const jitter = cappedDelay * 0.2 * (Math.random() * 2 - 1);
 		const delay = Math.max(0, cappedDelay + jitter);
 
 		return new Promise<void>((resolve, reject) => {
-			if (this.masterController.signal.aborted) {
-				reject(this.masterController.signal.reason);
+			if (master.signal.aborted) {
+				reject(master.signal.reason);
 				return;
 			}
 
 			const timer = setTimeout(() => {
-				this.masterController.signal.removeEventListener('abort', onAbort);
+				master.signal.removeEventListener('abort', onAbort);
 				resolve();
 			}, delay);
 
 			const onAbort = () => {
 				clearTimeout(timer);
-				reject(this.masterController.signal.reason);
+				reject(master.signal.reason);
 			};
 
-			this.masterController.signal.addEventListener('abort', onAbort, { once: true });
+			master.signal.addEventListener('abort', onAbort, { once: true });
 		});
 	}
 
-	private combineSignals(timeoutSignal: AbortSignal): AbortSignal {
-		const signals: AbortSignal[] = [this.masterController.signal, timeoutSignal];
-		if (this.externalSignal) signals.push(this.externalSignal);
+	private combineSignals(
+		timeoutSignal: AbortSignal,
+		master: AbortController = this.masterController,
+		external: AbortSignal | undefined = this.externalSignal
+	): AbortSignal {
+		const signals: AbortSignal[] = [master.signal, timeoutSignal];
+		if (external) signals.push(external);
 
 		// Modern runtimes
 		if (typeof AbortSignal !== 'undefined' && 'any' in AbortSignal) {
@@ -1023,6 +1156,10 @@ export class Fch extends URL {
 	/**
 	 * Abort ALL currently active HTTP requests AND pending retry delays for this instance.
 	 *
+	 * Only in-flight work is cancelled — the instance stays usable, and the next
+	 * {@link Fch.makeRequest} starts with a fresh abort generation. A caller-supplied
+	 * `AbortController` is owned by the caller and is never aborted here.
+	 *
 	 * @param {unknown} [reason] - Abort reason.
 	 * @returns {Fch} Current instance for chaining.
 	 *
@@ -1030,10 +1167,17 @@ export class Fch extends URL {
 	 * const req = fch('/api').setRetries(5);
 	 * req.send();
 	 * setTimeout(() => req.abort(), 100);
+	 * // a later request still works
+	 * await req.send();
 	 */
 	abort(reason?: unknown): this {
-		this.masterController.abort(reason ?? new DOMException('User aborted', 'AbortError'));
-		this.controller.abort(reason);
+		const abortReason = reason ?? new DOMException('User aborted', 'AbortError');
+		this.masterController.abort(abortReason);
+		// Legacy controller stays in sync only when we own it; makeRequest swaps
+		// in a fresh one so the abort does not poison future requests.
+		if (this.ownsController) {
+			this.controller.abort(abortReason);
+		}
 		return this;
 	}
 

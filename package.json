@@ -3,9 +3,10 @@
 	"version": "1.0.0",
 	"description": "A lightweight fetch helper library with retry, infinite stream and timeout functionality.",
 	"main": "dist/Fch.js",
-	"types": "dist/index.d.ts",
+	"types": "dist/Fch.d.ts",
 	"scripts": {
 		"build": "tsc",
+		"test": "vitest run",
 		"playground": "bun run --watch ./src/playground.ts",
 		"prepublishOnly": "npm run build"
 	},
