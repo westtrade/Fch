@@ -1,5 +1,5 @@
 import { describe, expect, test, vi, beforeEach } from "vitest";
-import Fch, { type Logger } from "../src/Fch";
+import { Fch, type Logger } from "../src/Fch";
 
 describe("Fch Logger", () => {
 	let mockLogger: Logger;
@@ -17,19 +17,22 @@ describe("Fch Logger", () => {
 	});
 
 	test("should use default logger when none provided", () => {
-		const fch = new Fch("https://api.example.com");
+		const fch = new Fch("https://api.example.com", { debug: true });
 
 		fch.getLogger().info("test info");
 		fch.getLogger().warn("test warn");
 		fch.getLogger().error("test error");
 
-		expect(console.log).toHaveBeenCalledWith("[INFO] test info");
-		expect(console.warn).toHaveBeenCalledWith("[WARN] test warn");
-		expect(console.error).toHaveBeenCalledWith("[ERROR] test error");
+		expect(console.log).toHaveBeenCalledWith("[INFO]", "test info");
+		expect(console.warn).toHaveBeenCalledWith("[WARN]", "test warn");
+		expect(console.error).toHaveBeenCalledWith("[ERROR]", "test error");
 	});
 
 	test("should use custom logger when provided", () => {
-		const fch = new Fch("https://api.example.com", { logger: mockLogger });
+		const fch = new Fch("https://api.example.com", {
+			logger: mockLogger,
+			debug: true,
+		});
 
 		fch.getLogger().info("custom info");
 		fch.getLogger().warn("custom warn");
@@ -44,11 +47,12 @@ describe("Fch Logger", () => {
 		const invalidLogger = { info: "not-a-function" } as unknown as Logger;
 		const fch = new Fch("https://api.example.com", {
 			logger: invalidLogger,
+			debug: true,
 		});
 
 		fch.getLogger().info("fallback test");
 
-		expect(console.log).toHaveBeenCalledWith("[INFO] fallback test");
+		expect(console.log).toHaveBeenCalledWith("[INFO]", "fallback test");
 	});
 
 	test("should respect logging enable/disable state", () => {

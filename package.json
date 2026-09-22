@@ -19,9 +19,20 @@
 	],
 	"author": "westtrade",
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/westtrade/Fch.git"
+	},
 	"devDependencies": {
 		"@mswjs/interceptors": "^0.37.6",
+		"@semantic-release/changelog": "^7.0.0",
+		"@semantic-release/commit-analyzer": "^13.0.1",
+		"@semantic-release/git": "^11.0.1",
+		"@semantic-release/github": "^12.0.10",
+		"@semantic-release/npm": "^13.2.0",
+		"@semantic-release/release-notes-generator": "^14.1.1",
 		"msw": "^2.7.0",
+		"semantic-release": "^25.0.9",
 		"typescript": "^5.0.0",
 		"vitest": "^3.0.5",
 		"winston": "^3.17.0"

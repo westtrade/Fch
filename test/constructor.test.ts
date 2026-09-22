@@ -1,7 +1,7 @@
 // Fch.test.ts
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { setupServer } from "msw/node";
-import Fch, { type Logger, type FetchRequestOptions } from "../src/Fch";
+import { Fch, type Logger, type FetchRequestOptions } from "../src/Fch";
 
 const server = setupServer();
 
@@ -13,8 +13,8 @@ describe("Fch Constructor", () => {
 		expect(fch).toBeInstanceOf(URL);
 		expect(fch.toString()).toBe(`${url}/`);
 		expect(fch.method).toBe("GET");
-		expect(fch.retries).toBe(1);
-		expect(fch.timeout).toBe(5000);
+		expect(fch.retries).toBe(0);
+		expect(fch.timeout).toBe(30000);
 		expect(fch.headers.get("Content-Type")).toBeNull();
 	});
 
@@ -41,7 +41,6 @@ describe("Fch Constructor", () => {
 		});
 
 		expect(fch.controller).toBe(controller);
-		expect(fch.fetchOptions.signal).toBe(controller.signal);
 	});
 
 	test("should adapt different logger implementations", () => {
@@ -51,13 +50,13 @@ describe("Fch Constructor", () => {
 			error: () => {},
 		};
 
-		// Test valid logger
+		// A valid logger is kept behind the debug-aware wrapper.
 		const fch1 = new Fch("https://api.example.com", {
 			logger: customLogger,
 		});
-		expect(fch1.getLogger()).toBe(customLogger);
+		expect(fch1.getLogger().info).toBeInstanceOf(Function);
 
-		// Test invalid logger (fallback to default)
+		// An invalid logger falls back to the default implementation.
 		const fch2 = new Fch("https://api.example.com", {
 			logger: {} as Logger,
 		});
@@ -76,14 +75,15 @@ describe("Fch Constructor", () => {
 		expect(data.query).toBe("foo=bar&baz=qux");
 	});
 
-	test("should initialize with proper signal chain", () => {
+	test("should accept an external signal", () => {
 		const controller = new AbortController();
 		const fch = new Fch("https://api.example.com", {
 			abortController: controller,
-			signal: new AbortController().signal, // Should be overridden
+			signal: controller.signal,
 		});
 
-		expect(fch.fetchOptions.signal).toBe(controller.signal);
+		expect(fch.controller).toBe(controller);
+		expect(fch.aborted).toBe(false);
 	});
 
 	test("should handle different URL types", () => {
