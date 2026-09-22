@@ -72,6 +72,125 @@ const SAFE_METHODS = new Set<HttpMethod>(['GET', 'HEAD', 'OPTIONS']);
 const MUTATING_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
+ * A `<form>` element, a submit event, or anything else with a `target`/`currentTarget`
+ * that points at a form. Typed structurally (`nodeType === 1`, `tagName === 'FORM'`)
+ * so the library stays usable in Node, where `HTMLFormElement`/`SubmitEvent` do not exist.
+ */
+export interface FormLike {
+	tagName?: string;
+	nodeType?: number;
+	method?: string;
+	action?: string;
+	enctype?: string;
+	target?: unknown;
+	currentTarget?: unknown;
+	submitter?: unknown;
+}
+
+/**
+ * A request body. In addition to everything `fetch()` accepts, `Fch` understands a
+ * `<form>` element and a submit `Event` and converts them to `FormData` for you.
+ */
+export type FchBody = BodyInit | FormLike | null;
+
+/**
+ * A shortcut body: anything {@link FchBody} accepts, plus a plain object/array,
+ * which is JSON-encoded with `Content-Type: application/json` for you.
+ */
+export type FchBodyInput =
+	| BodyInit
+	| FormLike
+	| Record<string, unknown>
+	| unknown[]
+	| null;
+
+/** Any DOM element (a form, but also the button that submitted it). */
+const isElement = (value: unknown): value is FormLike =>
+	!!value && typeof value === 'object' && (value as FormLike).nodeType === 1;
+
+const isFormElement = (value: unknown): value is FormLike =>
+	isElement(value) && String((value as FormLike).tagName).toUpperCase() === 'FORM';
+
+/**
+ * Resolve an `Event` (`submit`), a `<form>`, or a `FormData` into a `FormData`.
+ * Returns `null` when the value is not form-like, so callers can fall back to
+ * passing it to `fetch()` untouched.
+ *
+ * Handles the four spellings of the same intent:
+ * `new FormData(form)` · `event` · `event.target` · `form`.
+ */
+export function toFormData(value: unknown): FormData | null {
+	if (typeof FormData === 'undefined' || value == null) return null;
+	if (value instanceof FormData) return value;
+
+	const form = resolveForm(value);
+	return form ? buildFormData(form, resolveSubmitter(value)) : null;
+}
+
+/** Extract the `<form>` from a form element or from an event that targets one. */
+export function resolveForm(value: unknown): FormLike | null {
+	if (isFormElement(value)) return value;
+
+	if (value && typeof value === 'object') {
+		const event = value as FormLike;
+		// `target` is the form during a submit event; `currentTarget` covers
+		// listeners bound to the form, and survives `target` being retargeted.
+		for (const candidate of [event.target, event.currentTarget]) {
+			if (isFormElement(candidate)) return candidate;
+		}
+	}
+	return null;
+}
+
+/** The button that triggered a submit, so its name/value is included. */
+function resolveSubmitter(value: unknown): FormLike | null {
+	if (value && typeof value === 'object') {
+		// A submitter is a submit button (or `<input type=submit>`), not a form.
+		const submitter = (value as FormLike).submitter;
+		if (isElement(submitter) && !isFormElement(submitter)) return submitter;
+	}
+	return null;
+}
+
+function buildFormData(form: FormLike, submitter: FormLike | null): FormData {
+	try {
+		// The native constructor knows about disabled fields, unchecked boxes,
+		// multi-selects and file inputs — never reimplement it.
+		return new FormData(
+			form as unknown as HTMLFormElement,
+			submitter as unknown as HTMLElement
+		);
+	} catch {
+		try {
+			// Engines that reject the second argument still accept the form alone.
+			return new FormData(form as unknown as HTMLFormElement);
+		} catch {
+			// The object merely looked like a form (right `nodeType`/`tagName`) but is
+			// not a real element of this realm — do not silently send a wrong body.
+			throw new TypeError(
+				'Could not read the form: the value is not a real <form> element of this ' +
+					'environment. In Node, parse the HTML with a DOM (e.g. jsdom) and pass the ' +
+					'element from that same window.'
+			);
+		}
+	}
+}
+
+/** True for values `fetch()` can serialise itself, so we pass them straight through. */
+function isNativeBody(value: unknown): boolean {
+	if (typeof value === 'string') return true;
+	if (typeof FormData !== 'undefined' && value instanceof FormData) return true;
+	if (typeof URLSearchParams !== 'undefined' && value instanceof URLSearchParams) return true;
+	if (typeof Blob !== 'undefined' && value instanceof Blob) return true;
+	if (typeof ArrayBuffer !== 'undefined') {
+		if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return true;
+	}
+	if (typeof ReadableStream !== 'undefined' && value instanceof ReadableStream) return true;
+	return false;
+}
+
+
+/**
  * URL and `fetch` combined into a single object.
  *
  * The class **extends the native `URL`**, so an instance is a real, mutable URL
@@ -170,6 +289,12 @@ export class Fch extends URL {
 	/** Instance-level in-flight cache (isolated per instance). */
 	private inFlight = new Map<string, Promise<Response>>();
 
+	/**
+	 * Request started eagerly by {@link Fch.start} or by a shortcut, so that
+	 * fire-and-forget usage still sends immediately. `makeRequest` reuses it.
+	 */
+	private eagerRequest: Promise<Response> | null = null;
+
 	/** Master controller: aborts in-flight requests AND pending retry delays. */
 	private masterController = new AbortController();
 
@@ -213,6 +338,10 @@ export class Fch extends URL {
 			...options
 		}: FetchRequestOptions = {}
 	) {
+		// A relative path cannot be represented by `URL`; fail with a clear message
+		// instead of a bare "Invalid URL" from the parent constructor.
+		if (typeof url === 'string') assertAbsolute(url);
+
 		super(url.toString());
 
 		this.headers = new Headers(headers);
@@ -408,38 +537,98 @@ export class Fch extends URL {
 	}
 
 	/**
-	 * Set FormData directly.
-	 * @param {FormData} formData - FormData instance.
+	 * Set the form body from `FormData`, a `<form>` element, or a submit `Event`.
+	 *
+	 * All four spellings of the same intent work:
+	 *
+	 * ```ts
+	 * form.onsubmit = (e) => api.setFormData(new FormData(e.target as HTMLFormElement));
+	 * form.onsubmit = (e) => api.setFormData(e);          // the event itself
+	 * form.onsubmit = (e) => api.setFormData(e.target);   // the <form>
+	 * form.onsubmit = (e) => api.setFormData(form);       // the element
+	 * ```
+	 *
+	 * The HTTP method is taken from the form's `method` attribute when it is not the
+	 * default `GET` (so a `<form method="post">` posts, and `method="get"`/absent
+	 * keeps the normal form semantics). `Content-Type` is cleared so the runtime can
+	 * set the correct `multipart/form-data; boundary=…`.
+	 *
+	 * @param {FormData|HTMLFormElement|Event} formData - Form data, a form, or a submit event.
 	 * @returns {Fch} Current instance for chaining.
 	 *
 	 * @example
-	 * const fd = new FormData(); fd.append('key', 'value');
-	 * api.setFormData(fd);
+	 * form.onsubmit = (e) => { e.preventDefault(); api.setFormData(e).send(); };
 	 */
-	setFormData(formData: FormData): this {
-		this.formData = formData;
-		this.fetchOptions.body = formData;
+	setFormData(formData: FormData | FormLike): this {
+		const data = toFormData(formData);
+		if (!data) {
+			throw new TypeError(
+				'setFormData() expects FormData, a <form> element, or a submit event.'
+			);
+		}
+
+		const form = resolveForm(formData);
+		const declared = form?.method?.toLowerCase();
+
+		// Adopt the form's own method when it declares something other than GET.
+		if (declared && declared !== 'get') this.setMethod(declared);
+
+		// HTML semantics: a GET form encodes its fields into the query string and
+		// sends no body. This also keeps `api.get(url, form)` honest.
+		if (this.method === 'GET' || this.method === 'HEAD') {
+			if (form) return this.appendFormToQuery(data);
+			// Raw FormData with no form element and no method: an explicit body
+			// implies a write, so default to POST.
+			this.fetchOptions.method = 'POST';
+		}
+
+		this.formData = data;
+		this.fetchOptions.body = data;
+		// Let fetch() generate the multipart boundary itself.
 		this.headers.delete('Content-Type');
-		if (this.fetchOptions.method !== 'PUT') this.fetchOptions.method = 'POST';
+		return this;
+	}
+
+	/** Serialise form fields into the URL query string, as a browser GET submit does. */
+	private appendFormToQuery(data: FormData): this {
+		for (const [key, value] of data.entries()) {
+			this.searchParams.append(key, typeof value === 'string' ? value : value.name);
+		}
 		return this;
 	}
 
 	/**
 	 * Set raw request body. Clears any existing FormData.
 	 *
-	 * @param {string|ArrayBuffer|Blob|FormData|URLSearchParams|ReadableStream|null} body - Request body.
+	 * Also accepts a `<form>` element or a submit `Event`, which are converted to
+	 * `FormData` (see {@link Fch.setFormData}).
+	 *
+	 * @param {FchBody} body - Request body.
 	 * @param {string} [contentType] - Optional Content-Type header.
 	 * @returns {Fch} Current instance for chaining.
 	 *
 	 * @example
 	 * api.setBody('{"key":"value"}', 'application/json');
+	 * form.onsubmit = (e) => api.setBody(e).send();
 	 */
-	setBody(body: BodyInit | null, contentType?: string): this {
+	setBody(body: FchBody, contentType?: string): this {
+		// A form/event is not a valid fetch body — convert it, and take the method
+		// from the form when it declares one.
+		const asFormData = toFormData(body);
+		if (asFormData) {
+			return this.setFormData(asFormData);
+		}
+
 		this.formData = null;
-		this.fetchOptions.body = body;
+		this.fetchOptions.body = body as BodyInit | null;
+
 		if (contentType) {
 			this.headers.set('Content-Type', contentType);
+		} else if (!isNativeBody(body)) {
+			this.headers.delete('Content-Type');
 		} else {
+			// A native body carries its own content type (Blob), or must not have
+			// one set by us (FormData/URLSearchParams/streams).
 			this.headers.delete('Content-Type');
 		}
 		return this;
@@ -798,6 +987,12 @@ export class Fch extends URL {
 		retries: number = this.retries,
 		retryTimeout: number = this.retryDelay
 	): Promise<Response> {
+		// A request started by `start()` (or a shortcut) is reused, so `await req`,
+		// `req.json()`, `req.send()` etc. all observe the SAME request instead of
+		// firing a new one.
+		const eager = this.eagerRequest;
+		if (eager) return eager;
+
 		// `abort()` cancels in-flight work, but it must not leave the builder
 		// permanently unusable: start a fresh abort generation for this request.
 		if (this.masterController.signal.aborted) {
@@ -1186,6 +1381,7 @@ export class Fch extends URL {
 	abort(reason?: unknown): this {
 		const abortReason = reason ?? new DOMException('User aborted', 'AbortError');
 		this.masterController.abort(abortReason);
+		this.eagerRequest = null;
 		// Legacy controller stays in sync only when we own it; makeRequest swaps
 		// in a fresh one so the abort does not poison future requests.
 		if (this.ownsController) {
@@ -1260,6 +1456,31 @@ export class Fch extends URL {
 		}
 	}
 
+	/**
+	 * Begin the request immediately instead of on first `await`/`.then()`.
+	 *
+	 * Useful for fire-and-forget handlers, where the returned value is never
+	 * awaited:
+	 *
+	 * ```ts
+	 * form.onsubmit = (e) => { e.preventDefault(); api.setFormData(e).start(); };
+	 * ```
+	 *
+	 * The instance stays awaitable and every helper (`send`, `json`, `text`, …)
+	 * resolves against this same request rather than starting another one.
+	 *
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	start(): this {
+		if (!this.eagerRequest) {
+			this.eagerRequest = this.makeRequest();
+			// A fire-and-forget call has no rejection handler; mark it handled so
+			// Node does not report an unhandled rejection.
+			this.eagerRequest.catch(() => {});
+		}
+		return this;
+	}
+
 	toString(): string {
 		return super.toString();
 	}
@@ -1284,4 +1505,237 @@ export const fch = (url: string | URL, options: FetchRequestOptions = {}): Fch =
 	return new Fch(url, options);
 };
 
-export default fch;
+/** Options accepted by the `fch.create()` factory and by every shortcut. */
+export interface FchInstanceOptions extends FetchRequestOptions {
+	/** Base URL prepended to relative request paths. */
+	baseUrl?: string;
+	/** Alias for `baseUrl`. */
+	baseURL?: string;
+}
+
+/** Resolve `url` against an optional base, so `api.post('/houses', form)` works. */
+function resolveUrl(url: string | URL, baseUrl?: string): string | URL {
+	if (baseUrl == null || url instanceof URL) return url;
+
+	// Absolute URLs (with a scheme) ignore the base.
+	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+
+	if (url.startsWith('//')) return url;
+
+	return new URL(url.replace(/^\//, ''), baseUrl.replace(/\/?$/, '/')).toString();
+}
+
+/**
+ * `URL` cannot represent a relative path, and `Fch` extends `URL`. Rather than
+ * letting `fetch()` fail later with an opaque error, say exactly what is missing.
+ */
+function assertAbsolute(url: string): void {
+	if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) return;
+
+	const hint =
+		typeof location !== 'undefined' && location.origin
+			? ` or resolve it against the page origin (${location.origin})`
+			: '';
+
+	throw new TypeError(
+		`Fch requires an absolute URL, got "${url}". ` +
+			`Pass a full URL${hint}, or set \`baseUrl\` via fch.create({ baseUrl }).`
+	);
+}
+
+/**
+ * A shortcut call. The request starts **immediately**, so fire-and-forget handlers
+ * work without `await`:
+ *
+ * ```ts
+ * form.onsubmit = (e) => { e.preventDefault(); api.post('/houses', e); };
+ * ```
+ *
+ * The returned value is still thenable and exposes the usual helpers
+ * (`json()`, `text()`, `send()`, …), all resolving against that same request.
+ */
+export interface FchCall<T = unknown> extends Promise<[T, Response]> {
+	json<R = T>(): Promise<[R, Response]>;
+	text(): Promise<[string, Response]>;
+	blob(): Promise<[Blob, Response]>;
+	send(): Promise<Response>;
+	/** The instance handling this call, for further configuration or `abort()`. */
+	request: Fch;
+}
+
+/**
+ * Parse a response the way the reference "body" output does: JSON when the server
+ * says so, plain text otherwise. The body is read from a clone so the caller can
+ * still use `response.json()`/`text()` afterwards.
+ */
+async function parseBody<T>(response: Response): Promise<T> {
+	const clone = response.clone();
+	const contentType = clone.headers.get('content-type') ?? '';
+
+	if (contentType.includes('json')) {
+		const text = await clone.text();
+		return (text ? JSON.parse(text) : null) as T;
+	}
+
+	return (await clone.text()) as unknown as T;
+}
+
+/** Attach the tuple/promise helpers to an eagerly started instance. */
+function toCall<T>(instance: Fch): FchCall<T> {
+	// Start once, now: `start()` memoises the in-flight request, so every helper
+	// below (and `abort()`) observes that single request instead of firing another.
+	instance.start();
+
+	const json = <R>() =>
+		instance.makeRequest().then(async (r): Promise<[R, Response]> => [await r.json() as R, r]);
+	const text = () =>
+		instance.makeRequest().then(async (r): Promise<[string, Response]> => [await r.text(), r]);
+	const blob = () =>
+		instance.makeRequest().then(async (r): Promise<[Blob, Response]> => [await r.blob(), r]);
+	const send = () => instance.makeRequest();
+
+	const promise = instance
+		.makeRequest()
+		.then(async (response): Promise<[T, Response]> => [await parseBody<T>(response), response]);
+
+	// A fire-and-forget call has no rejection handler; keep Node quiet.
+	promise.catch(() => {});
+
+	return Object.assign(promise, {
+		json: json as FchCall<T>['json'],
+		text,
+		blob,
+		send,
+		request: instance,
+	}) as unknown as FchCall<T>;
+}
+
+const SHORTCUT_METHODS = ['get', 'head', 'delete', 'post', 'put', 'patch'] as const;
+type ShortcutMethod = (typeof SHORTCUT_METHODS)[number];
+
+const BODYLESS_METHODS: ReadonlySet<ShortcutMethod> = new Set(['get', 'head']);
+
+/** Drop shortcut-only keys so they never reach `fetch()`. */
+function toRequestOptions(options?: FchInstanceOptions): FetchRequestOptions {
+	if (!options) return {};
+	const { baseUrl, baseURL, ...rest } = options;
+	return rest;
+}
+
+/** Build the convenience methods shared by the default export and `create()`. */
+function withShortcuts(baseUrl?: string) {
+	const shortcuts = {} as Record<
+		ShortcutMethod,
+		(url: string | URL, ...rest: unknown[]) => FchCall
+	>;
+
+	for (const method of SHORTCUT_METHODS) {
+		shortcuts[method] = (url: string | URL, ...rest: unknown[]) => {
+			// `get(url, options)` / `post(url, body, options)`
+			const hasBody = !BODYLESS_METHODS.has(method);
+			const body = hasBody ? (rest[0] as FchBodyInput | undefined) : undefined;
+			const options = (hasBody ? rest[1] : rest[0]) as FchInstanceOptions | undefined;
+
+			const request = new Fch(
+				resolveUrl(url, options?.baseUrl ?? options?.baseURL ?? baseUrl),
+				{ ...toRequestOptions(options), method: method.toUpperCase() }
+			);
+
+			if (hasBody && body !== undefined && body !== null) {
+				applyShortcutBody(request, body);
+			}
+
+			return toCall(request);
+		};
+	}
+
+	return shortcuts;
+}
+
+/**
+ * Encode a shortcut body:
+ * - `<form>` / submit event → `FormData` (the shortcut's method wins over the
+ *   form's `method` attribute, since the caller asked for it explicitly)
+ * - plain object / array → JSON with `Content-Type: application/json`
+ * - anything else → handed to `fetch()` as-is
+ */
+function applyShortcutBody(request: Fch, body: FchBodyInput): void {
+	if (toFormData(body)) {
+		const intendedMethod = request.method;
+		request.setFormData(body as FormData | FormLike);
+		request.setMethod(intendedMethod);
+		return;
+	}
+
+	const isPlainData =
+		typeof body === 'object' &&
+		!isNativeBody(body) &&
+		!ArrayBuffer.isView(body) &&
+		!(body instanceof ArrayBuffer) &&
+		typeof (body as { pipe?: unknown }).pipe !== 'function';
+
+	if (isPlainData) {
+		request.setJsonBody(body);
+		return;
+	}
+
+	request.setBody(body as FchBody);
+
+	// Node requires `duplex: 'half'` for any streamed request body.
+	if (isStreamBody(body)) {
+		request.setFetchOptions({ duplex: 'half' } as RequestInit);
+	}
+}
+
+const isStreamBody = (body: unknown): boolean =>
+	!!body &&
+	typeof body === 'object' &&
+	((typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) ||
+		typeof (body as { pipe?: unknown }).pipe === 'function');
+
+/**
+ * Create a configured shorthand API. Its methods start their request immediately,
+ * so fire-and-forget handlers work without `await`:
+ *
+ * ```ts
+ * const api = fch.create({ baseUrl: 'https://api.example.com' });
+ *
+ * form.onsubmit = (e) => { e.preventDefault(); api.post('/houses', e); };
+ * ```
+ *
+ * @param {FchInstanceOptions} [options] - Shared defaults, including `baseUrl`.
+ * @returns Shortcut methods (`get`, `post`, `put`, `patch`, `delete`, `head`) plus
+ * `request()` for a fresh builder with the same defaults.
+ */
+export function create(options: FchInstanceOptions = {}) {
+	const { baseUrl, baseURL, ...defaults } = options;
+	const base = baseUrl ?? baseURL;
+
+	return {
+		...withShortcuts(base),
+		/** A fresh builder carrying the shared defaults, for chaining. */
+		request: (url: string | URL, extra: FchInstanceOptions = {}) =>
+			new Fch(resolveUrl(url, extra.baseUrl ?? extra.baseURL ?? base), {
+				...defaults,
+				...toRequestOptions(extra),
+			}),
+		/** The shared defaults this instance was created with. */
+		defaults,
+	};
+}
+
+export type FchApi = ReturnType<typeof create>;
+
+/** The `fch` factory with the `create()` shorthand API attached. */
+export interface FchFactory {
+	(url: string | URL, options?: FetchRequestOptions): Fch;
+	create(options?: FchInstanceOptions): FchApi;
+}
+
+// `fch.create(...)` mirrors the ergonomics of the reference implementation without
+// giving up the URL-first behaviour of the class.
+const fchFactory = Object.assign(fch, { create }) as FchFactory;
+
+export { fchFactory as fchWithCreate };
+
+export default fchFactory;

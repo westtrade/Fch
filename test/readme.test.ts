@@ -125,12 +125,20 @@ describe("Readme examples", () => {
 			"setDedupeKey", "setIdempotencyKey",
 			"addRequestInterceptor", "addResponseInterceptor",
 			"getLogger", "setLogger", "enableLogging", "disableLogging",
-			"abort", "clone",
+			"abort", "clone", "start",
 		];
 		for (const m of members) {
 			expect(typeof (req as never as Record<string, unknown>)[m], m).toBe("function");
 		}
 		expect(req).toBeInstanceOf(URL);
 		expect("aborted" in req).toBe(true);
+	});
+
+	test("the documented fch.create shortcuts exist", async () => {
+		const { create } = await import("../src/Fch");
+		const api = create({ baseUrl: "https://api.example.com" });
+		for (const m of ["get", "head", "post", "put", "patch", "delete", "request"]) {
+			expect(typeof (api as never as Record<string, unknown>)[m], m).toBe("function");
+		}
 	});
 });

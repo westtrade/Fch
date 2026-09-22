@@ -127,6 +127,56 @@ await pending.catch(() => {});
 await req.send();          // the builder is still usable afterwards
 ```
 
+### Forms and events
+
+A `<form>` element or a submit `Event` is accepted anywhere a body goes — no manual
+`new FormData()` needed. All of these do the same thing:
+
+```ts
+form.onsubmit = (e) => api.post("/houses", new FormData(e.target));
+form.onsubmit = (e) => api.post("/houses", e);          // the event itself
+form.onsubmit = (e) => api.post("/houses", e.target);   // the <form>
+form.onsubmit = (e) => api.post("/houses", form);       // the element
+```
+
+The form's own `method` attribute is honoured (a `<form method="post">` posts), the
+clicked submit button's name/value is included, and `Content-Type` is left to the
+runtime so it can set the correct `multipart/form-data; boundary=…`. A
+`<form method="get">` puts its fields in the query string and sends no body, as a
+browser would. This also works on the builder API:
+
+```ts
+const req = new Fch("https://api.example.com/houses");
+req.setFormData(e);            // or .setBody(e)
+await req.send();
+```
+
+### Shorthand API
+
+`fch.create()` mirrors the ergonomics of Axios-style clients. Shortcut calls start
+their request **immediately**, so fire-and-forget handlers work without `await`:
+
+```ts
+const api = fch.create({ baseUrl: "https://api.example.com" });
+
+api.get("/houses");
+api.post("/houses", { name: "Cute Cottage" });   // object → JSON + Content-Type
+api.put("/houses/1", new Blob([png]));           // binary untouched
+api.delete("/houses/1");
+
+form.onsubmit = (e) => { e.preventDefault(); api.post("/houses", e); };  // not awaited
+
+// A single call resolves to [parsedBody, response].
+const [houses, response] = await api.get<House[]>("/houses");
+
+// Need the builder instead? Ask for one with the shared defaults applied.
+api.request("/houses").setAuthToken(token).json();
+```
+
+Because `Fch` extends `URL`, an absolute URL is required — either pass a full URL or
+set `baseUrl` via `fch.create()`. A relative path without a base throws a descriptive
+`TypeError` rather than an opaque `Invalid URL`.
+
 ## API overview
 
 | Area | Members |
@@ -135,12 +185,13 @@ await req.send();          // the builder is still usable afterwards
 | Execute | `send()`, `json()`, `text()`, `blob()`, `makeRequest()`, `then()`, `catch()`, `finally()` |
 | URL helpers | `setSearchParams()`, `appendSearchParams()` |
 | Bodies | `setJsonBody()`, `setFormData()`, `appendToFormData()`, `setFormUrlEncodedBody()`, `setBody()` |
+| Shortcuts | `fch.create({ baseUrl })` → `get()`, `head()`, `post()`, `put()`, `patch()`, `delete()`, `request()` |
 | Headers | `setHeader()`, `setHeaders()`, `getHeader()`, `deleteHeader()`, `setAuthToken()`, `setBasicAuth()` |
 | Request config | `setMethod()`, `setTimeout()`, `setRetries()`, `setRetryDelay()`, `setMaxRetryDelay()`, `setRetryOn()`, `setFetchOptions()`, `setCORS()`, `disableCache()` |
 | Dedupe | `setDedupeKey()`, `setIdempotencyKey()` (deprecated alias) |
 | Interceptors | `addRequestInterceptor()`, `addResponseInterceptor()` |
 | Logging | `getLogger()`, `setLogger()`, `enableLogging()`, `disableLogging()` |
-| Lifecycle | `abort()`, `aborted`, `clone()` |
+| Lifecycle | `abort()`, `aborted`, `clone()`, `start()` |
 | Polling | `poll(delay?)` — async generator of repeated responses |
 
 ## License
