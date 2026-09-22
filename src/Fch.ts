@@ -72,8 +72,15 @@ const SAFE_METHODS = new Set<HttpMethod>(['GET', 'HEAD', 'OPTIONS']);
 const MUTATING_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 /**
- * Enhanced fetch client extending URL with advanced request handling capabilities.
- * Supports retries, timeouts, interceptors, logging, deduplication, and various data formats.
+ * URL and `fetch` combined into a single object.
+ *
+ * The class **extends the native `URL`**, so an instance is a real, mutable URL
+ * (`pathname`, `host`, `searchParams`, `hash`, `toString()` all work normally) and
+ * at the same time the request that targets it. There is no separate
+ * "build a URL, then hand it to a client" step — the same object is both.
+ *
+ * Supports retries, timeouts, interceptors, logging, deduplication, and various
+ * data formats.
  *
  * **Core contract:** Every call to `await`, `.then()`, `.catch()`, `.finally()`, `.json()`, etc.
  * initiates a NEW independent HTTP request. The instance is a reusable request *builder*, not a
@@ -83,8 +90,14 @@ const MUTATING_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'PATCH', 'DELETE'])
  * @extends URL
  *
  * @example
- * const api = new Fch('https://api.example.com', { timeout: 3000 });
- * const [users, response] = await api.setAuthToken(token).json();
+ * const req = new Fch('https://api.example.com/v1/search', { timeout: 3000 });
+ *
+ * // It is a URL — the standard API drives the request target.
+ * req.pathname = '/v2/search';
+ * req.searchParams.set('q', 'hello');
+ *
+ * // It is also the request.
+ * const [users, response] = await req.json<User[]>();
  */
 export class Fch extends URL {
 	// ============================================================

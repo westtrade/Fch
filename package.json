@@ -1,7 +1,7 @@
 {
 	"name": "fch",
 	"version": "1.0.0",
-	"description": "A lightweight fetch helper library with retry, infinite stream and timeout functionality.",
+	"description": "URL and fetch combined: a request builder that IS a URL — with retries, timeouts, dedupe and typed body helpers.",
 	"main": "dist/Fch.js",
 	"types": "dist/Fch.d.ts",
 	"scripts": {
@@ -12,10 +12,13 @@
 	},
 	"keywords": [
 		"fetch",
+		"url",
 		"request",
 		"retry",
 		"timeout",
-		"http"
+		"http",
+		"urlsearchparams",
+		"typescript"
 	],
 	"author": "westtrade",
 	"license": "MIT",
