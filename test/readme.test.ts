@@ -81,7 +81,10 @@ describe("Readme examples", () => {
 		const req = new Fch("https://api.example.com/profile", { dedupe: true });
 		const [a, b] = await Promise.all([req.json(), req.json()]);
 		expect(calls).toHaveLength(1);
-		expect(a).toEqual(b);
+		// Compare the parsed payloads only: the two Response objects are distinct
+		// instances, and comparing them structurally is runtime-dependent.
+		expect(a[0]).toEqual(b[0]);
+		expect(a[0]).toEqual({ items: ["a"], id: 1, name: "Alice" });
 	});
 
 	test("'Cancelling' snippet keeps the builder usable", async () => {
