@@ -1,6 +1,6 @@
 {
 	"name": "fch",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"description": "URL and fetch combined: a request builder that IS a URL — with retries, timeouts, dedupe and typed body helpers.",
 	"main": "dist/Fch.js",
 	"types": "dist/Fch.d.ts",
