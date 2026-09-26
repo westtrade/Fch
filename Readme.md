@@ -85,11 +85,11 @@ const api = new Fch("https://api.example.com/orders", {
 	debug: true,
 })
 	.setAuthToken(process.env.TOKEN!)
-	.addRequestInterceptor((req) => {
+	.before((req) => {
 		// runs before EVERY attempt, so a refreshed token is picked up
 		req.setHeader("X-Request-Id", crypto.randomUUID());
 	})
-	.addResponseInterceptor(async (res) => {
+	.after(async (res) => {
 		if (res.status === 401) throw new Error("Unauthorized");
 		return res;
 	})
@@ -189,7 +189,7 @@ set `baseUrl` via `fch.create()`. A relative path without a base throws a descri
 | Headers | `setHeader()`, `setHeaders()`, `getHeader()`, `deleteHeader()`, `setAuthToken()`, `setBasicAuth()` |
 | Request config | `setMethod()`, `setTimeout()`, `setRetries()`, `setRetryDelay()`, `setMaxRetryDelay()`, `setRetryOn()`, `setFetchOptions()`, `setCORS()`, `disableCache()` |
 | Dedupe | `setDedupeKey()`, `setIdempotencyKey()` (deprecated alias) |
-| Interceptors | `addRequestInterceptor()`, `addResponseInterceptor()` |
+| Interceptors | `before()`, `after()` — `addRequestInterceptor()`/`addResponseInterceptor()` are deprecated aliases |
 | Logging | `getLogger()`, `setLogger()`, `enableLogging()`, `disableLogging()` |
 | Lifecycle | `abort()`, `aborted`, `clone()`, `start()` |
 | Polling | `poll(delay?)` — async generator of repeated responses |

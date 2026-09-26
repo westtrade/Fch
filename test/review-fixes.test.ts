@@ -203,7 +203,7 @@ describe("H3 — request interceptors run before every attempt", () => {
 		});
 
 		const req = new Fch(`${B}/flaky`, { retries: 2, retryDelay: 0 });
-		req.addRequestInterceptor(() => {
+		req.before(() => {
 			interceptorRuns += 1;
 		});
 
@@ -230,13 +230,54 @@ describe("H3 — request interceptors run before every attempt", () => {
 
 		const req = new Fch(`${B}/token`, { retries: 2, retryDelay: 0 });
 		req.setRetryOn((response) => response?.status === 500);
-		req.addRequestInterceptor((r) => {
+		req.before((r) => {
 			n += 1;
 			r.setHeader("X-Attempt", String(n));
 		});
 
 		await req.makeRequest();
 		expect(seen).toEqual(["1", "2", "3"]);
+	});
+
+	test("a thenable-returning interceptor does not recurse", async () => {
+		// Regression: `Fch` is thenable, so `(req) => req.setHeader(...)` returns the
+		// instance itself. Awaiting that resolved value started another request,
+		// recursively, until the process ran out of memory.
+		let fetchCalls = 0;
+		globalThis.fetch = (async () => {
+			fetchCalls += 1;
+			return new Response("{}", {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+
+		const req = new Fch(`${B}/once`);
+		req.before((r) => r.setHeader("X-Once", "1"));
+
+		await req.makeRequest();
+		expect(fetchCalls).toBe(1);
+	});
+
+	test("async interceptors are still awaited before the request", async () => {
+		let fetchCalls = 0;
+		let headerWasSet = false;
+
+		globalThis.fetch = (async (_url: string, init: RequestInit) => {
+			fetchCalls += 1;
+			headerWasSet = new Headers(init.headers).get("X-Settled") === "1";
+			return new Response("{}", { status: 200 });
+		}) as unknown as typeof fetch;
+
+		const req = new Fch(`${B}/async-hook`);
+		req.before(async (r) => {
+			await new Promise((resolve) => setTimeout(resolve, 5));
+			r.setHeader("X-Settled", "1");
+		});
+
+		await req.makeRequest();
+		expect(fetchCalls).toBe(1);
+		expect(headerWasSet).toBe(true);
 	});
 });
 

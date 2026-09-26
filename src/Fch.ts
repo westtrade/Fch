@@ -931,40 +931,64 @@ export class Fch extends URL {
 	// ============================================================
 
 	/**
-	 * Add a request interceptor. Runs before every attempt (including retries).
+	 * Register a **request** hook, called before every attempt (including retries)
+	 * so it can refresh credentials, request ids, or any other per-attempt state.
 	 * May mutate the Fch instance (headers, URL, body).
 	 *
-	 * @param {(request: Fch) => void|Promise<void>} interceptor - Interceptor function.
+	 * Several hooks may be registered; they run in registration order.
+	 *
+	 * @param {(request: Fch) => void|Promise<void>} interceptor - Hook function.
 	 * @returns {Fch} Current instance for chaining.
 	 *
 	 * @example
-	 * api.addRequestInterceptor((req) => {
+	 * api.before((req) => {
 	 *   req.setHeader('X-Request-Id', crypto.randomUUID());
 	 * });
 	 */
-	addRequestInterceptor(interceptor: (request: Fch) => void | Promise<void>): this {
+	before(interceptor: (request: Fch) => void | Promise<void>): this {
 		this.requestInterceptors.push(interceptor);
 		return this;
 	}
 
 	/**
-	 * Add a response interceptor. Applied before the response is returned.
+	 * Register a **response** hook, applied to the response before it is returned.
 	 * Must NOT consume the response body (use `response.clone()` if needed).
 	 *
-	 * @param {(response: Response) => Response|Promise<Response>} interceptor - Interceptor.
+	 * Several hooks may be registered; they run in registration order, each
+	 * receiving the previous hook's result.
+	 *
+	 * @param {(response: Response) => Response|Promise<Response>} interceptor - Hook.
 	 * @returns {Fch} Current instance for chaining.
 	 *
 	 * @example
-	 * api.addResponseInterceptor(async (res) => {
+	 * api.after(async (res) => {
 	 *   if (res.status === 401) throw new Error('Unauthorized');
 	 *   return res;
 	 * });
 	 */
+	after(interceptor: (response: Response) => Response | Promise<Response>): this {
+		this.responseInterceptors.push(interceptor);
+		return this;
+	}
+
+	/**
+	 * @deprecated Use {@link Fch.before} instead.
+	 * @param {(request: Fch) => void|Promise<void>} interceptor - Hook function.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	addRequestInterceptor(interceptor: (request: Fch) => void | Promise<void>): this {
+		return this.before(interceptor);
+	}
+
+	/**
+	 * @deprecated Use {@link Fch.after} instead.
+	 * @param {(response: Response) => Response|Promise<Response>} interceptor - Hook.
+	 * @returns {Fch} Current instance for chaining.
+	 */
 	addResponseInterceptor(
 		interceptor: (response: Response) => Response | Promise<Response>
 	): this {
-		this.responseInterceptors.push(interceptor);
-		return this;
+		return this.after(interceptor);
 	}
 
 	// ============================================================
@@ -1056,7 +1080,12 @@ export class Fch extends URL {
 				// Request interceptors run before EVERY attempt (including
 				// retries) so they can refresh credentials or request ids.
 				for (const interceptor of this.requestInterceptors) {
-					await interceptor(this);
+					// `Fch` is thenable, so a concise arrow that returns a chaining
+					// call (`(req) => req.setHeader(...)`) would otherwise resolve
+					// the instance itself and start another request — recursively,
+					// until the heap dies. Only await genuine promises.
+					const result = interceptor(this);
+					if (result instanceof Promise) await result;
 				}
 
 				// Per-attempt snapshot: isolates this attempt from later mutations

@@ -62,10 +62,10 @@ describe("Readme examples", () => {
 			debug: false,
 		})
 			.setAuthToken("t")
-			.addRequestInterceptor((req) => {
+			.before((req) => {
 				req.setHeader("X-Request-Id", "abc");
 			})
-			.addResponseInterceptor(async (res) => res)
+			.after(async (res) => res)
 			.setRetryOn((response, error, attempt) => {
 				if (response) return response.status === 429 || response.status >= 500;
 				return attempt < 3;
@@ -123,7 +123,7 @@ describe("Readme examples", () => {
 			"setMethod", "setTimeout", "setRetries", "setRetryDelay", "setMaxRetryDelay",
 			"setRetryOn", "setFetchOptions", "setCORS", "disableCache",
 			"setDedupeKey", "setIdempotencyKey",
-			"addRequestInterceptor", "addResponseInterceptor",
+			"before", "after",
 			"getLogger", "setLogger", "enableLogging", "disableLogging",
 			"abort", "clone", "start",
 		];
@@ -132,6 +132,18 @@ describe("Readme examples", () => {
 		}
 		expect(req).toBeInstanceOf(URL);
 		expect("aborted" in req).toBe(true);
+	});
+
+	test("the deprecated aliases still work", async () => {
+		const req = new Fch("https://api.example.com/x");
+
+		// Called, not merely present: the alias must delegate to before()/after()
+		// and take effect during a real request.
+		req.addRequestInterceptor((r) => r.setHeader("X-Via-Alias", "1"));
+		req.addResponseInterceptor(async (res) => res);
+
+		await req.makeRequest();
+		expect(new Headers(calls[0].init.headers).get("X-Via-Alias")).toBe("1");
 	});
 
 	test("the documented fch.create shortcuts exist", async () => {

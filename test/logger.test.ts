@@ -99,9 +99,9 @@ describe("Fch Logger", () => {
 			debug: true,
 		});
 
-		fch.addRequestInterceptor((req) => {
+		fch.before((req) => {
 			req.setHeaders({ "X-Test": "true" });
-		}).addResponseInterceptor((res) => {
+		}).after((res) => {
 			res.headers.set("X-Processed", "true");
 			return res;
 		});
