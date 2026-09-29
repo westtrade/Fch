@@ -1084,8 +1084,17 @@ export class Fch extends URL {
 					// call (`(req) => req.setHeader(...)`) would otherwise resolve
 					// the instance itself and start another request — recursively,
 					// until the heap dies. Only await genuine promises.
-					const result = interceptor(this);
-					if (result instanceof Promise) await result;
+					const result: unknown = interceptor(this);
+					// Fch itself is thenable; only await native promises returned by
+					// async hooks. Awaiting arbitrary thenables here can invoke Fch.then()
+					// and recursively start another request.
+					if (
+						result !== (this as unknown) &&
+						result &&
+						typeof (result as PromiseLike<unknown>).then === 'function'
+					) {
+						await result;
+					}
 				}
 
 				// Per-attempt snapshot: isolates this attempt from later mutations
