@@ -36,7 +36,7 @@ describe("B1 — catch() logs only on a real rejection", () => {
 		expect(logger.error).not.toHaveBeenCalled();
 	});
 
-	test("logs once when the request actually fails", async () => {
+	test("the failure is reported to the logger exactly once", async () => {
 		const logger = useLogger();
 		stubFetch(() => {
 			throw new Error("network down");
@@ -47,12 +47,10 @@ describe("B1 — catch() logs only on a real rejection", () => {
 
 		expect(caught).toBe("network down");
 
-		// Exactly one of the error lines is the catch() one; the retry loop also
-		// logs "Request failed", which is fine.
-		const catchLogs = logger.error.mock.calls.filter(([msg]) =>
-			String(msg).includes("Caught an error")
-		);
-		expect(catchLogs).toHaveLength(1);
+		// The retry loop logs the failure; catch() must not add a second [ERROR]
+		// line for the same error (it used to). One failed call, one error line.
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(String(logger.error.mock.calls[0][0])).toContain("Request failed");
 	});
 });
 
@@ -340,5 +338,203 @@ describe("B12 — shortcuts are generic", () => {
 		const [houses] = await create({ baseUrl: B }).get<{ id: number }[]>("/houses");
 
 		expect(houses).toEqual([{ id: 7 }]);
+	});
+});
+
+// ---------------------------------------------------------------- B13
+
+describe("B13 — poll() uses the caller's interval, not a retry backoff", () => {
+	test("the poll delay is not clamped to maxRetryDelay", async () => {
+		globalThis.fetch = vi.fn(async () => ok()) as unknown as typeof fetch;
+
+		// timeout: 0 disables the per-request timer, so every setTimeout is the poll sleep.
+		const req = new Fch(`${B}/x`, { maxRetryDelay: 1000, timeout: 0 });
+		const delays: number[] = [];
+		const realSetTimeout = globalThis.setTimeout;
+		(globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
+			fn: () => void,
+			ms: number
+		) => {
+			delays.push(ms);
+			return realSetTimeout(fn, 0);
+		}) as unknown as typeof setTimeout;
+
+		try {
+			const iterator = req.poll(60_000);
+			await iterator.next();
+			await Promise.race([iterator.next(), new Promise((r) => realSetTimeout(r, 20))]);
+		} finally {
+			globalThis.setTimeout = realSetTimeout;
+		}
+
+		expect(delays[0]).toBe(60_000);
+	});
+});
+
+// ---------------------------------------------------------------- B14
+
+describe("B14 — retry backoff still honours maxRetryDelay", () => {
+	test("the backoff sleep stays within the cap plus jitter", async () => {
+		globalThis.fetch = vi.fn(async () => {
+			throw new Error("down");
+		}) as unknown as typeof fetch;
+
+		const req = new Fch(`${B}/x`, {
+			maxRetryDelay: 50,
+			timeout: 0,
+			retries: 3,
+			retryDelay: 100_000,
+		});
+
+		const delays: number[] = [];
+		const realSetTimeout = globalThis.setTimeout;
+		(globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((
+			fn: () => void,
+			ms: number
+		) => {
+			delays.push(ms);
+			return realSetTimeout(fn, 0);
+		}) as unknown as typeof setTimeout;
+
+		try {
+			await req.send().catch(() => {});
+		} finally {
+			globalThis.setTimeout = realSetTimeout;
+		}
+
+		// 50ms cap + at most 20% jitter.
+		expect(Math.max(...delays)).toBeLessThanOrEqual(60);
+	});
+});
+
+// ---------------------------------------------------------------- B15
+
+describe("B15 — the fallback signal wiring releases its listeners", () => {
+	test("a pre-aborted signal leaves nothing hooked on the master", async () => {
+		const anyDescriptor = Object.getOwnPropertyDescriptor(AbortSignal, "any");
+		// Force the hand-wired branch that runtimes without AbortSignal.any use.
+		delete (AbortSignal as unknown as { any?: unknown }).any;
+
+		try {
+			globalThis.fetch = vi.fn(async () => ok()) as unknown as typeof fetch;
+			const external = new AbortController();
+			external.abort();
+
+			const req = new Fch(`${B}/x`, { signal: external.signal });
+			for (let i = 0; i < 20; i++) await req.send().catch(() => {});
+
+			const master = (req as unknown as { masterController: AbortController }).masterController;
+			const eventsSymbol = Object.getOwnPropertySymbols(master.signal).find(
+				(symbol) => String(symbol) === "Symbol(kEvents)"
+			);
+			const events = eventsSymbol
+				? (master.signal as unknown as Record<symbol, Map<string, Set<unknown>>>)[eventsSymbol]
+				: undefined;
+
+			expect(events?.get("abort")?.size ?? 0).toBe(0);
+		} finally {
+			if (anyDescriptor) Object.defineProperty(AbortSignal, "any", anyDescriptor);
+		}
+	});
+});
+
+// ---------------------------------------------------------------- B16
+
+describe("B16 — concurrent requests keep separate timeout state", () => {
+	test("a later healthy request does not erase an earlier request's timeout", async () => {
+		let calls = 0;
+		globalThis.fetch = vi.fn(((_url: string, init: RequestInit) => {
+			calls += 1;
+			if (calls === 1) {
+				// Starts first, finishes last: this is the request that times out.
+				return new Promise((_resolve, reject) =>
+					init.signal?.addEventListener("abort", () =>
+						reject(new DOMException("Request timeout", "TimeoutError"))
+					)
+				);
+			}
+			// Starts second, succeeds and clears only its own timeout state.
+			return new Promise((resolve) => setTimeout(() => resolve(ok()), 60));
+		}) as unknown as typeof fetch);
+
+		const req = new Fch(`${B}/x`, { timeout: 30, retries: 0 });
+		const failing = req.send().catch((error) => error);
+		const healthy = req.send().catch((error) => error);
+
+		await Promise.all([failing, healthy]);
+		// The healthy request settles AFTER the timeout fired. A single shared
+		// boolean would be reset to false here and hide the timeout entirely.
+		expect(req.aborted).toBe(true);
+	});
+
+	test("aborted is true once a lone request has timed out", async () => {
+		globalThis.fetch = vi.fn(
+			(_url: string, init: RequestInit) =>
+				new Promise((_resolve, reject) =>
+					init.signal?.addEventListener("abort", () =>
+						reject(new DOMException("Request timeout", "TimeoutError"))
+					)
+				)
+		) as unknown as typeof fetch;
+
+		const req = new Fch(`${B}/slow`, { timeout: 20, retries: 0 });
+		await req.send().catch(() => {});
+
+		expect(req.aborted).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------- B17
+
+describe("B17 — a relative baseUrl fails with a useful message", () => {
+	test("names the problem instead of an opaque Invalid URL", () => {
+		expect(() => create({ baseUrl: "/api" }).get("/x")).toThrow(/absolute `baseUrl`/);
+	});
+
+	test("an absolute baseUrl keeps working", () => {
+		expect(create({ baseUrl: B }).request("/x").toString()).toBe(`${B}/x`);
+	});
+});
+
+// ---------------------------------------------------------------- B18
+
+describe("B18 — setSearchParams replaces the query", () => {
+	test("previous params are cleared", () => {
+		const req = new Fch(`${B}/x?a=1&b=2`).setSearchParams({ page: 2 });
+
+		expect(req.search).toBe("?page=2");
+	});
+
+	test("appendSearchParams still appends repeated values", () => {
+		const req = new Fch(`${B}/x?a=1`).appendSearchParams({ tag: ["x", "y"] });
+
+		expect(req.searchParams.getAll("tag")).toEqual(["x", "y"]);
+	});
+});
+
+// ---------------------------------------------------------------- B19
+
+describe("B19 — method validation is the same in the constructor and setMethod", () => {
+	test("both reject an unsupported method", () => {
+		expect(() => new Fch(B, { method: "FOO" })).toThrow(/Unsupported HTTP method/);
+		expect(() => new Fch(B).setMethod("FOO")).toThrow(/Unsupported HTTP method/);
+		expect(() => {
+			new Fch(B).method = "FOO";
+		}).toThrow(/Unsupported HTTP method/);
+	});
+
+	test("a lowercase method is still normalised", () => {
+		expect(new Fch(B, { method: "post" }).method).toBe("POST");
+	});
+});
+
+// ---------------------------------------------------------------- B20
+
+describe("B20 — setFetchOptions validates the method too", () => {
+	test("rejects an unsupported method instead of smuggling it through", () => {
+		const req = new Fch(B);
+
+		expect(() => req.setFetchOptions({ method: "FOO" })).toThrow(/Unsupported HTTP method/);
+		expect(req.setFetchOptions({ method: "patch" }).method).toBe("PATCH");
 	});
 });

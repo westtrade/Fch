@@ -188,7 +188,7 @@ options second.
 | --- | --- |
 | URL (inherited) | `pathname`, `host`, `origin`, `searchParams`, `hash`, `toString()` |
 | Execute | `send()`, `json()`, `text()`, `blob()`, `makeRequest()`, `then()`, `catch()`, `finally()` |
-| URL helpers | `setSearchParams()`, `appendSearchParams()` |
+| URL helpers | `setSearchParams()` (replaces the query), `appendSearchParams()` (adds to it) |
 | Bodies | `setJsonBody()`, `setFormData()`, `appendToFormData()`, `setFormUrlEncodedBody()`, `setBody()` |
 | Shortcuts | `fch.create({ baseUrl })` → `get()`, `head()`, `post()`, `put()`, `patch()`, `delete()`, `request()` |
 | Headers | `setHeader()`, `setHeaders()`, `getHeader()`, `deleteHeader()`, `setAuthToken()`, `setBasicAuth()` |
@@ -197,7 +197,7 @@ options second.
 | Interceptors | `before()`, `after()` — `addRequestInterceptor()`/`addResponseInterceptor()` are deprecated aliases |
 | Logging | `getLogger()`, `setLogger()`, `enableLogging()`, `disableLogging()` |
 | Lifecycle | `abort()`, `aborted`, `clone()`, `start()` |
-| Polling | `poll(delay?)` — async generator of repeated responses |
+| Polling | `poll(delay?)` — async generator of repeated responses; `delay` is used exactly, not clamped by `maxRetryDelay` |
 
 ## License
 

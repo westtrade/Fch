@@ -70,6 +70,19 @@ export interface FetchRequestOptions extends RequestInit {
 
 const SAFE_METHODS = new Set<HttpMethod>(['GET', 'HEAD', 'OPTIONS']);
 const MUTATING_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'PATCH', 'DELETE']);
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
+
+/**
+ * Upper-case and validate an HTTP method. Shared by the constructor and
+ * {@link Fch.setMethod} so `{ method: 'FOO' }` fails exactly like `setMethod('FOO')`.
+ */
+function normalizeMethod(method: string): HttpMethod {
+	const normalized = method.toUpperCase();
+	if (!(HTTP_METHODS as readonly string[]).includes(normalized)) {
+		throw new TypeError(`Unsupported HTTP method: ${method}`);
+	}
+	return normalized as HttpMethod;
+}
 
 /**
  * A `<form>` element, a submit event, or anything else with a `target`/`currentTarget`
@@ -280,7 +293,11 @@ export class Fch extends URL {
 	/** True when `abortController` was not supplied and we created the controller. */
 	private ownsController = true;
 
-	/** True when the last attempt failed because the per-attempt timeout fired. */
+	/**
+	 * True when a request on this instance timed out. Reset when the next
+	 * request starts — NOT when a concurrent request happens to succeed, which
+	 * would erase the timeout of the request that is still in flight.
+	 */
 	private timedOut = false;
 
 	private retryOn?: (
@@ -356,8 +373,9 @@ export class Fch extends URL {
 		this.fetchOptions = {
 			...options,
 			// Normalize here so `{ method: 'post' }` behaves exactly like
-			// `setMethod('POST')` (idempotency/dedupe checks are case-sensitive).
-			method: (options.method ? String(options.method) : 'GET').toUpperCase(),
+			// `setMethod('POST')` (idempotency/dedupe checks are case-sensitive) —
+			// including rejecting an unsupported method instead of sending it.
+			method: normalizeMethod(options.method ? String(options.method) : 'GET'),
 		};
 
 		this.retries = retries;
@@ -409,6 +427,9 @@ export class Fch extends URL {
 	/**
 	 * Whether the request was aborted — either explicitly via {@link Fch.abort}
 	 * or because the per-attempt timeout fired.
+	 *
+	 * Timeout state is cleared when the next request starts, so a concurrent
+	 * request finishing cannot mask a timeout that already happened.
 	 * @returns {boolean}
 	 */
 	get aborted(): boolean {
@@ -482,7 +503,9 @@ export class Fch extends URL {
 	// ============================================================
 
 	/**
-	 * Set (replace) search params for the request.
+	 * Replace the search params for the request: the query string is cleared
+	 * first, so `?page=1` + `setSearchParams({ page: 2 })` is `?page=2` and not
+	 * `?page=2&page=1`. Use {@link Fch.appendSearchParams} to add instead.
 	 * @param {Record<string, string|number|boolean>} params - Key/value pairs.
 	 * @returns {Fch} Current instance for chaining.
 	 *
@@ -490,6 +513,7 @@ export class Fch extends URL {
 	 * api.setSearchParams({ key: 'value', page: 1 });
 	 */
 	setSearchParams(params: Record<string, string | number | boolean>): this {
+		for (const key of [...this.searchParams.keys()]) this.searchParams.delete(key);
 		for (const [key, value] of Object.entries(params)) {
 			this.searchParams.set(key, String(value));
 		}
@@ -786,11 +810,7 @@ export class Fch extends URL {
 	 * api.setMethod('POST');
 	 */
 	setMethod(method: string): this {
-		const normalized = method.toUpperCase();
-		if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].includes(normalized)) {
-			throw new TypeError(`Unsupported HTTP method: ${method}`);
-		}
-		this.fetchOptions.method = normalized;
+		this.fetchOptions.method = normalizeMethod(method);
 		return this;
 	}
 
@@ -799,7 +819,7 @@ export class Fch extends URL {
 	}
 
 	set method(value: string) {
-		this.fetchOptions.method = value.toUpperCase();
+		this.fetchOptions.method = normalizeMethod(value);
 	}
 
 	/**
@@ -841,6 +861,12 @@ export class Fch extends URL {
 	setFetchOptions(options: RequestInit): this {
 		const { headers, ...rest } = options;
 		this.fetchOptions = { ...this.fetchOptions, ...rest };
+
+		// `method` gets the same validation as `setMethod`/the constructor, so
+		// this door cannot smuggle in a method those two would reject.
+		if (rest.method !== undefined) {
+			this.fetchOptions.method = normalizeMethod(String(rest.method));
+		}
 
 		if (headers !== undefined) {
 			new Headers(headers).forEach((value, key) => {
@@ -1041,6 +1067,9 @@ export class Fch extends URL {
 			this.externalSignal = this.userSignal ?? this.controller.signal;
 		}
 
+		// A new request clears the previous request's timeout state. Only this
+		// point resets it — an attempt succeeding must not, or a concurrent
+		// success would erase the timeout of a request still in flight.
 		this.timedOut = false;
 
 		if (!Number.isInteger(retries) || retries < 0) {
@@ -1144,7 +1173,6 @@ export class Fch extends URL {
 				// influenced by a concurrent request on the same instance.
 				let attemptTimedOut = false;
 
-				this.timedOut = false;
 				if (this.timeout > 0) {
 					timeoutId = setTimeout(() => {
 						attemptTimedOut = true;
@@ -1173,8 +1201,10 @@ export class Fch extends URL {
 						signal: combinedSignal,
 					});
 
+					// Note: a successful attempt deliberately does NOT clear
+					// `this.timedOut` — a concurrent request may have timed out, and
+					// erasing that would misreport it. The next request resets it.
 					if (timeoutId) clearTimeout(timeoutId);
-					this.timedOut = false;
 
 					// Retry policy for HTTP responses
 					const shouldRetry = this.retryOn
@@ -1289,16 +1319,11 @@ export class Fch extends URL {
 		}
 	}
 
-	private sleepWithJitter(
-		baseMs: number,
-		attempt: number,
-		master: AbortController = this.masterController
-	): Promise<void> {
-		const expDelay = baseMs * Math.pow(2, attempt - 1);
-		const cappedDelay = Math.min(this.maxRetryDelay, expDelay);
-		const jitter = cappedDelay * 0.2 * (Math.random() * 2 - 1);
-		const delay = Math.max(0, cappedDelay + jitter);
-
+	/**
+	 * Sleep for a fixed delay, rejecting if `master` aborts. Shared by the retry
+	 * backoff and by `poll()`, which wants an exact, user-supplied interval.
+	 */
+	private sleep(ms: number, master: AbortController = this.masterController): Promise<void> {
 		return new Promise<void>((resolve, reject) => {
 			if (master.signal.aborted) {
 				reject(master.signal.reason);
@@ -1308,7 +1333,7 @@ export class Fch extends URL {
 			const timer = setTimeout(() => {
 				master.signal.removeEventListener('abort', onAbort);
 				resolve();
-			}, delay);
+			}, ms);
 
 			const onAbort = () => {
 				clearTimeout(timer);
@@ -1317,6 +1342,22 @@ export class Fch extends URL {
 
 			master.signal.addEventListener('abort', onAbort, { once: true });
 		});
+	}
+
+	/**
+	 * Exponential backoff with jitter, capped by `maxRetryDelay`. The cap applies
+	 * to the delay before jitter, so the actual wait may exceed it by up to 20% —
+	 * that is what keeps a fleet of clients from retrying in lockstep.
+	 */
+	private sleepWithJitter(
+		baseMs: number,
+		attempt: number,
+		master: AbortController = this.masterController
+	): Promise<void> {
+		const expDelay = baseMs * Math.pow(2, attempt - 1);
+		const cappedDelay = Math.min(this.maxRetryDelay, expDelay);
+		const jitter = cappedDelay * 0.2 * (Math.random() * 2 - 1);
+		return this.sleep(Math.max(0, cappedDelay + jitter), master);
 	}
 
 	private combineSignals(
@@ -1342,21 +1383,25 @@ export class Fch extends URL {
 		// accumulate one listener per attempt on its master signal.
 		const combined = new AbortController();
 		const handlers: Array<[AbortSignal, () => void]> = [];
+		const disconnect = () => {
+			for (const [signal, handler] of handlers) signal.removeEventListener('abort', handler);
+			handlers.length = 0;
+		};
+
 		for (const s of signals) {
 			if (s.aborted) {
+				// Bail out early, but still hand back `disconnect`: the listeners
+				// already registered above must be released too, or every attempt
+				// on a pre-aborted signal leaks one per remaining source.
 				combined.abort(s.reason);
+				disconnect();
 				return { signal: combined.signal, disconnect: noop };
 			}
 			const handler = () => combined.abort(s.reason);
 			handlers.push([s, handler]);
 			s.addEventListener('abort', handler, { once: true });
 		}
-		return {
-			signal: combined.signal,
-			disconnect: () => {
-				for (const [s, handler] of handlers) s.removeEventListener('abort', handler);
-			},
-		};
+		return { signal: combined.signal, disconnect };
 	}
 
 	// ============================================================
@@ -1385,10 +1430,11 @@ export class Fch extends URL {
 		onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
 	): Promise<Response | TResult> {
 		return this.makeRequest().catch(async (error) => {
-			// Log here, inside the rejection path: `.catch()` is also used to
-			// silence expected failures, and logging eagerly would emit a bogus
-			// [ERROR] line for every successful request.
-			this.log('error', 'Caught an error during the request:', error);
+			// Debug, not error: `makeRequest` already logged this failure once
+			// (`Request failed (attempt N)`), and a second [ERROR] line for the
+			// same error only doubles the noise. Logging happens here rather
+			// than eagerly, since `.catch()` is also used on successful requests.
+			this.log('debug', 'Caught an error during the request:', error);
 			if (!onRejected) throw error;
 			return onRejected(error);
 		});
@@ -1570,7 +1616,9 @@ export class Fch extends URL {
 
 			if (abortController.signal.aborted || this.masterController.signal.aborted) break;
 
-			await this.sleepWithJitter(delay, 1); // fixed delay for polling (no backoff)
+			// The poll interval is the caller's, not a retry backoff: `sleep()`
+			// keeps it exact instead of clamping it to `maxRetryDelay`.
+			await this.sleep(delay);
 		}
 	}
 
@@ -1636,9 +1684,22 @@ export interface FchInstanceOptions extends FetchRequestOptions {
 	baseURL?: string;
 }
 
-/** Resolve `url` against an optional base, so `api.post('/houses', form)` works. */
+/**
+ * Resolve `url` against an optional base, so `api.post('/houses', form)` works.
+ *
+ * The base itself must be absolute: a relative `baseUrl` ("/api") would be handed
+ * to `new URL()` as a base and fail with an opaque "Invalid URL" further down, so
+ * it is rejected here with the same message the constructor uses.
+ */
 function resolveUrl(url: string | URL, baseUrl?: string): string | URL {
 	if (baseUrl == null || url instanceof URL) return url;
+
+	if (!/^[a-z][a-z0-9+.-]*:/i.test(baseUrl) && !baseUrl.startsWith('//')) {
+		throw new TypeError(
+			`Fch requires an absolute \`baseUrl\`, got "${baseUrl}". ` +
+				`Pass a full URL, e.g. \`fch.create({ baseUrl: 'https://api.example.com' })\`.`
+		);
+	}
 
 	// Absolute URLs (with a scheme) ignore the base.
 	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
