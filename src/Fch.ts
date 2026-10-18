@@ -1458,6 +1458,15 @@ export class Fch extends URL {
 	// ============================================================
 
 	/**
+	 * Run the request and read its body from a *clone*, so the returned
+	 * `Response` stays readable for the caller — and so a second call (e.g. after
+	 * `start()` memoised a single request) does not hit "Body already read".
+	 */
+	private tuple<T>(read: (response: Response) => Promise<T>): Promise<[T, Response]> {
+		return this.makeRequest().then(async (response) => [await read(response.clone()), response]);
+	}
+
+	/**
 	 * Execute request and parse body as JSON. Returns tuple `[data, response]`.
 	 *
 	 * @template T - Expected data type.
@@ -1468,13 +1477,7 @@ export class Fch extends URL {
 	 * const [users, response] = await api.json<User[]>();
 	 */
 	json<T = unknown>(): Promise<[T, Response]> {
-		// The body is read from a clone so the returned `response` stays
-		// readable for the caller — and so a second call (e.g. after `start()`
-		// memoised a single request) does not hit "Body already read".
-		return this.makeRequest().then(async (response) => [
-			(await response.clone().json()) as T,
-			response,
-		]);
+		return this.tuple((response) => response.json() as Promise<T>);
 	}
 
 	/**
@@ -1482,10 +1485,7 @@ export class Fch extends URL {
 	 * @returns {Promise<[string, Response]>}
 	 */
 	text(): Promise<[string, Response]> {
-		return this.makeRequest().then(async (response) => [
-			await response.clone().text(),
-			response,
-		]);
+		return this.tuple((response) => response.text());
 	}
 
 	/**
@@ -1493,10 +1493,7 @@ export class Fch extends URL {
 	 * @returns {Promise<[Blob, Response]>}
 	 */
 	blob(): Promise<[Blob, Response]> {
-		return this.makeRequest().then(async (response) => [
-			await response.clone().blob(),
-			response,
-		]);
+		return this.tuple((response) => response.blob());
 	}
 
 	/**
@@ -1790,16 +1787,6 @@ function toCall<T>(instance: Fch): FchCall<T> {
 	// below (and `abort()`) observes that single request instead of firing another.
 	instance.start();
 
-	// Each helper reads from a clone so the shared eager response body stays
-	// unread and several helpers can be used on the same call.
-	const json = <R>() =>
-		instance.makeRequest().then(async (r): Promise<[R, Response]> => [await r.clone().json() as R, r]);
-	const text = () =>
-		instance.makeRequest().then(async (r): Promise<[string, Response]> => [await r.clone().text(), r]);
-	const blob = () =>
-		instance.makeRequest().then(async (r): Promise<[Blob, Response]> => [await r.clone().blob(), r]);
-	const send = () => instance.makeRequest();
-
 	const promise = instance
 		.makeRequest()
 		.then(async (response): Promise<[T, Response]> => [await parseBody<T>(response), response]);
@@ -1807,11 +1794,13 @@ function toCall<T>(instance: Fch): FchCall<T> {
 	// A fire-and-forget call has no rejection handler; keep Node quiet.
 	promise.catch(() => {});
 
+	// The instance helpers already read the body from a clone, so the shared
+	// eager response stays unread and several helpers work on the same call.
 	return Object.assign(promise, {
-		json: json as FchCall<T>['json'],
-		text,
-		blob,
-		send,
+		json: instance.json.bind(instance),
+		text: instance.text.bind(instance),
+		blob: instance.blob.bind(instance),
+		send: instance.send.bind(instance),
 		request: instance,
 	}) as unknown as FchCall<T>;
 }
