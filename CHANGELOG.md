@@ -1,3 +1,10 @@
+## [1.2.2](https://github.com/westtrade/Fch/compare/v1.2.1...v1.2.2) (2026-10-18)
+
+
+### Bug Fixes
+
+* poll interval, signal cleanup, timeout state and method validation ([c43efa6](https://github.com/westtrade/Fch/commit/c43efa66c20d45c7a1736a31eebe3d72dce81a05))
+
 ## [1.2.1](https://github.com/westtrade/Fch/compare/v1.2.0...v1.2.1) (2026-10-18)
 
 
