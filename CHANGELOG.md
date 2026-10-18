@@ -1,3 +1,10 @@
+## [1.2.3](https://github.com/westtrade/Fch/compare/v1.2.2...v1.2.3) (2026-10-18)
+
+
+### Bug Fixes
+
+* serialise forms in body-less shortcuts, drop dead makeRequest args ([93d7b2a](https://github.com/westtrade/Fch/commit/93d7b2af6c63340551742b4e363a16364dc09f67))
+
 ## [1.2.2](https://github.com/westtrade/Fch/compare/v1.2.1...v1.2.2) (2026-10-18)
 
 
