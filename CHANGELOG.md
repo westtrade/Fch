@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/westtrade/Fch/compare/v1.2.0...v1.2.1) (2026-10-18)
+
+
+### Bug Fixes
+
+* honour create() defaults, keep clone() bodies, and stop eager poisoning ([57231f8](https://github.com/westtrade/Fch/commit/57231f8b1928963be99953d1f746db17d47378bb))
+
 # [1.2.0](https://github.com/westtrade/Fch/compare/v1.1.0...v1.2.0) (2026-09-29)
 
 
