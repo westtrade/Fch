@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { Fch } from "../src/Fch";
 
+// `Fch` is thenable. A request hook written as a concise arrow that returns a
+// chaining call (`(req) => req.setHeader(...)`) returns the instance itself, and
+// awaiting that would start another request — recursively. These tests pin the
+// guard that awaits only genuine promises.
 type Any = (request: Fch) => unknown;
 const B = "https://api.example.com";
 
@@ -14,34 +18,48 @@ function stub(cap: number) {
 	return () => calls;
 }
 
-describe("safe-await probe", () => {
-	test("S1_sync_concise", async () => {
+describe("request hooks are not awaited as thenables", () => {
+	test("a hook returning the instance does not start a second request", async () => {
 		const calls = stub(5);
 		const req = new Fch(`${B}/a`);
 		req.before(((r: Fch) => r.setHeader("X-A", "1")) as Any);
+
 		await req.makeRequest();
+
 		expect(calls()).toBe(1);
 		expect(req.getHeader("X-A")).toBe("1");
 	});
-	test("S2_async_concise", async () => {
+
+	test("an async hook is awaited before the request is sent", async () => {
 		const calls = stub(5);
 		let settled = false;
 		const req = new Fch(`${B}/b`);
-		req.before((async (r: Fch) => { r.setHeader("X-B", "1"); settled = true; }) as Any);
+		req.before((async (r: Fch) => {
+			r.setHeader("X-B", "1");
+			settled = true;
+		}) as Any);
+
 		await req.makeRequest();
+
 		expect(calls()).toBe(1);
 		expect(settled).toBe(true);
 	});
-	test("S4_rejected_hook_propagates", async () => {
+
+	test("a rejected hook propagates instead of being swallowed", async () => {
 		stub(5);
 		const req = new Fch(`${B}/d`);
 		req.before((() => Promise.reject(new Error("hook failed"))) as Any);
+
 		await expect(req.makeRequest()).rejects.toThrow("hook failed");
 	});
-	test("S5_sync_throw_propagates", async () => {
+
+	test("a synchronously throwing hook propagates too", async () => {
 		stub(5);
 		const req = new Fch(`${B}/e`);
-		req.before((() => { throw new Error("boom"); }) as Any);
+		req.before((() => {
+			throw new Error("boom");
+		}) as Any);
+
 		await expect(req.makeRequest()).rejects.toThrow("boom");
 	});
 });

@@ -11,5 +11,5 @@
 		"emitDeclarationOnly": false
 	},
 	"include": ["src/**/*.ts"],
-	"exclude": ["node_modules", "src/playground.ts"]
+	"exclude": ["node_modules"]
 }

@@ -442,8 +442,10 @@ describe("regression guard — previously working behaviour", () => {
 
 	test("negative retries are rejected instead of silently doing nothing", async () => {
 		stubFetch(() => ok());
-		const req = new Fch(`${B}/bad`);
-		await expect(req.makeRequest(-1)).rejects.toThrow(/Invalid retries/);
+		// `retries` is no longer a positional override, so the invalid value now
+		// has to arrive the only way left: through the configuration.
+		const req = new Fch(`${B}/bad`, { retries: -1 });
+		await expect(req.makeRequest()).rejects.toThrow(/Invalid retries/);
 	});
 
 	test("a resolved request returns a readable response", async () => {

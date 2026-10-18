@@ -538,3 +538,116 @@ describe("B20 — setFetchOptions validates the method too", () => {
 		expect(req.setFetchOptions({ method: "patch" }).method).toBe("PATCH");
 	});
 });
+
+// ---------------------------------------------------------------- B21
+
+describe("B21 — a form passed to get/head/delete lands in the query string", () => {
+	function form(fields: Record<string, string>): FormData {
+		const data = new FormData();
+		for (const [key, value] of Object.entries(fields)) data.append(key, value);
+		return data;
+	}
+
+	test("get(url, form) serialises the fields into the query", async () => {
+		const seen: { url: string; init: RequestInit }[] = [];
+		globalThis.fetch = vi.fn(async (url: string, init: RequestInit) => {
+			seen.push({ url, init });
+			return ok();
+		}) as unknown as typeof fetch;
+
+		await create({ baseUrl: B }).get("/x", form({ a: "1", b: "2" })).send();
+
+		expect(seen[0].url).toBe(`${B}/x?a=1&b=2`);
+		// The form's own properties must not leak into the fetch init object.
+		expect(Object.keys(seen[0].init)).not.toContain("nodeType");
+		expect(seen[0].init.body ?? null).toBeNull();
+	});
+
+	test("head(url, form) does the same", async () => {
+		const seen: { url: string }[] = [];
+		globalThis.fetch = vi.fn(async (url: string) => {
+			seen.push({ url });
+			return ok();
+		}) as unknown as typeof fetch;
+
+		await create({ baseUrl: B }).head("/x", form({ q: "z" })).send();
+
+		expect(seen[0].url).toBe(`${B}/x?q=z`);
+	});
+
+	test("delete(url, form) keeps the DELETE method and uses the query", async () => {
+		const seen: { url: string; init: RequestInit }[] = [];
+		globalThis.fetch = vi.fn(async (url: string, init: RequestInit) => {
+			seen.push({ url, init });
+			return ok();
+		}) as unknown as typeof fetch;
+
+		await create({ baseUrl: B }).delete("/x", form({ id: "7" })).send();
+
+		expect(seen[0].url).toBe(`${B}/x?id=7`);
+		expect(seen[0].init.method).toBe("DELETE");
+	});
+
+	test("get(url, options) still treats the second argument as options", async () => {
+		globalThis.fetch = vi.fn(async () => ok()) as unknown as typeof fetch;
+
+		const request = create({ baseUrl: B }).get("/x", { timeout: 42 }).request;
+
+		expect(request.timeout).toBe(42);
+		expect(request.toString()).toBe(`${B}/x`);
+	});
+});
+
+// ---------------------------------------------------------------- B22
+
+describe("B22 — makeRequest takes no positional overrides", () => {
+	test("the retry configuration comes from the instance", async () => {
+		let calls = 0;
+		globalThis.fetch = vi.fn(async () => {
+			calls += 1;
+			throw new Error("down");
+		}) as unknown as typeof fetch;
+
+		await new Fch(`${B}/x`, { retries: 2, retryDelay: 0 }).makeRequest().catch(() => {});
+
+		expect(calls).toBe(3);
+	});
+
+	test("the signature has no parameters", () => {
+		expect(Fch.prototype.makeRequest.length).toBe(0);
+	});
+});
+
+// ---------------------------------------------------------------- B23
+
+describe("B23 — clone() does not inherit the caller's abort signal", () => {
+	test("aborting the original controller leaves the clone running", async () => {
+		let sawAbort = false;
+		globalThis.fetch = vi.fn(((_url: string, init: RequestInit) => {
+			return new Promise((resolve) => {
+				init.signal?.addEventListener("abort", () => {
+					sawAbort = true;
+				});
+				setTimeout(() => resolve(ok()), 30);
+			});
+		}) as unknown as typeof fetch);
+
+		const controller = new AbortController();
+		const original = new Fch(`${B}/x`).setFetchOptions({ signal: controller.signal });
+		const clone = original.clone();
+
+		const pending = clone.send();
+		controller.abort();
+
+		await expect(pending).resolves.toBeInstanceOf(Response);
+		expect(sawAbort).toBe(false);
+	});
+
+	test("other fetch options are still copied", () => {
+		const original = new Fch(B).setFetchOptions({ credentials: "include", cache: "no-store" });
+		const clone = original.clone();
+
+		expect((clone.fetchOptions as RequestInit).credentials).toBe("include");
+		expect((clone.fetchOptions as RequestInit).signal).toBeUndefined();
+	});
+});

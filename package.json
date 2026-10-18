@@ -7,7 +7,6 @@
 	"scripts": {
 		"build": "tsc",
 		"test": "vitest run",
-		"playground": "bun run --watch ./src/playground.ts",
 		"prepublishOnly": "npm run build"
 	},
 	"keywords": [
@@ -38,8 +37,7 @@
 		"msw": "^2.7.0",
 		"semantic-release": "^25.0.9",
 		"typescript": "^5.0.0",
-		"vitest": "^3.0.5",
-		"winston": "^3.17.0"
+		"vitest": "^3.0.5"
 	},
 	"files": [
 		"dist"

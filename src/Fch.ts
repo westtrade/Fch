@@ -618,8 +618,13 @@ export class Fch extends URL {
 		return this;
 	}
 
-	/** Serialise form fields into the URL query string, as a browser GET submit does. */
-	private appendFormToQuery(data: FormData): this {
+	/**
+	 * Serialise form fields into the URL query string, as a browser GET submit does.
+	 * File inputs contribute their filename, since a query string cannot carry bytes.
+	 * @param {FormData} data - Fields to append.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	appendFormToQuery(data: FormData): this {
 		for (const [key, value] of data.entries()) {
 			this.searchParams.append(key, typeof value === 'string' ? value : value.name);
 		}
@@ -1030,23 +1035,22 @@ export class Fch extends URL {
 	 * Each call initiates a NEW independent request. Configuration is snapshotted at call time,
 	 * so subsequent mutations to the Fch instance do NOT affect in-flight requests.
 	 *
-	 * @param {number} [retries] - Override default retry count.
-	 * @param {number} [retryTimeout] - Override default retry delay (ms).
+	 * Uses this instance's `retries` and `retryDelay`; change them with
+	 * {@link Fch.setRetries}/{@link Fch.setRetryDelay}. (The old positional
+	 * overrides were unreachable once `start()` had memoised a request.)
+	 *
 	 * @returns {Promise<Response>} Fetch response.
 	 * @throws {Error} When request fails after all retries.
 	 * @throws {TypeError} When `retries > 0` and body is a ReadableStream.
 	 */
-	async makeRequest(
-		retries: number = this.retries,
-		retryTimeout: number = this.retryDelay
-	): Promise<Response> {
+	async makeRequest(): Promise<Response> {
 		// A request started by `start()` (or a shortcut) is reused, so `await req`,
 		// `req.json()`, `req.send()` etc. all observe the SAME request instead of
 		// firing a new one.
 		const eager = this.eagerRequest;
 		if (eager) return eager;
 
-		return this.executeRequest(retries, retryTimeout);
+		return this.executeRequest(this.retries, this.retryDelay);
 	}
 
 	/**
@@ -1543,7 +1547,11 @@ export class Fch extends URL {
 	 * @returns {Fch} New Fch instance.
 	 */
 	clone(): Fch {
-		const clone = new Fch(this.toString(), { ...this.fetchOptions });
+		// `signal` is deliberately not carried over: `fetchOptions.signal` is the
+		// caller's lifetime, and a clone that inherited it would abort whenever
+		// the original was cancelled. Everything else is copied below.
+		const { signal: _signal, ...transferable } = this.fetchOptions;
+		const clone = new Fch(this.toString(), { ...transferable });
 		clone.setHeaders(Object.fromEntries(this.headers.entries()));
 		// `toString()` already carries every search param, including repeated
 		// values. Do not round-trip through a Record: that would collapse
@@ -1842,7 +1850,27 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 		shortcuts[method] = <T>(url: string | URL, ...rest: unknown[]) => {
 			// `get(url, options)` / `post(url, body, options)`
 			const hasBody = !BODYLESS_METHODS.has(method);
-			const body = hasBody ? (rest[0] as FchBodyInput | undefined) : undefined;
+			const first = rest[0] as FchBodyInput | undefined;
+
+			// A form is accepted anywhere a body goes, including the body-less
+			// shortcuts: HTML says a GET form contributes its fields to the query
+			// string. Without this `api.get(url, form)` sent nothing at all and
+			// leaked the form's own properties into the `fetch()` init object.
+			const form = !hasBody && first != null ? toFormData(first) : null;
+			if (form) {
+				const options = rest[1] as FchInstanceOptions | undefined;
+				const request = new Fch(resolveUrl(url, options?.baseUrl ?? options?.baseURL ?? baseUrl), {
+					...defaults,
+					...toRequestOptions(options),
+					headers: mergeHeaders(defaults.headers, options?.headers),
+					method: method.toUpperCase(),
+				});
+				// Put the fields in the query string, exactly as a GET form submit
+				// does. No body, and no form-object properties reach `fetch()`.
+				request.appendFormToQuery(form);
+				return toCall<T>(request);
+			}
+
 			const options = (hasBody ? rest[1] : rest[0]) as FchInstanceOptions | undefined;
 
 			const request = new Fch(resolveUrl(url, options?.baseUrl ?? options?.baseURL ?? baseUrl), {
@@ -1855,8 +1883,8 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 				method: method.toUpperCase(),
 			});
 
-			if (hasBody && body !== undefined && body !== null) {
-				applyShortcutBody(request, body);
+			if (hasBody && first !== undefined && first !== null) {
+				applyShortcutBody(request, first);
 			}
 
 			return toCall<T>(request);
