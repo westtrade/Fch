@@ -176,6 +176,14 @@ function buildFormData(form: FormLike, submitter: FormLike | null): FormData {
 	}
 }
 
+/** Base64-encode text as UTF-8 — `btoa` alone rejects non-Latin-1 characters. */
+function base64Encode(text: string): string {
+	const bytes = new TextEncoder().encode(text);
+	let binary = '';
+	for (const byte of bytes) binary += String.fromCharCode(byte);
+	return btoa(binary);
+}
+
 /** True for values `fetch()` can serialise itself, so we pass them straight through. */
 function isNativeBody(value: unknown): boolean {
 	if (typeof value === 'string') return true;
@@ -444,16 +452,13 @@ export class Fch extends URL {
 	 * @returns {Logger} Wrapped logger.
 	 */
 	getLogger(): Logger {
-		const log = (level: keyof Logger, ...args: unknown[]) => {
-			if (!this.shouldLog(level)) return;
-			const fn = this.logger[level];
-			if (typeof fn === 'function') (fn as (...a: unknown[]) => void)(...args);
-		};
+		// Thin wrappers over the private {@link Fch.log}; the debug-aware
+		// gating lives in exactly one place.
 		return {
-			info: (...args) => log('info', ...args),
-			warn: (...args) => log('warn', ...args),
-			error: (...args) => log('error', ...args),
-			debug: (...args) => log('debug', ...args),
+			info: (...args) => this.log('info', ...args),
+			warn: (...args) => this.log('warn', ...args),
+			error: (...args) => this.log('error', ...args),
+			debug: (...args) => this.log('debug', ...args),
 		};
 	}
 
@@ -624,11 +629,10 @@ export class Fch extends URL {
 
 		if (contentType) {
 			this.headers.set('Content-Type', contentType);
-		} else if (!isNativeBody(body)) {
-			this.headers.delete('Content-Type');
 		} else {
-			// A native body carries its own content type (Blob), or must not have
-			// one set by us (FormData/URLSearchParams/streams).
+			// A native body either carries its own content type (Blob) or must
+			// not have one set by us (FormData/URLSearchParams/streams) — either
+			// way we do not impose a header.
 			this.headers.delete('Content-Type');
 		}
 		return this;
@@ -741,8 +745,7 @@ export class Fch extends URL {
 	 * api.setBasicAuth('user', 'pass');
 	 */
 	setBasicAuth(username: string, password: string): this {
-		const auth = btoa(`${username}:${password}`);
-		this.headers.set('Authorization', `Basic ${auth}`);
+		this.headers.set('Authorization', `Basic ${base64Encode(`${username}:${password}`)}`);
 		return this;
 	}
 
@@ -1017,6 +1020,19 @@ export class Fch extends URL {
 		const eager = this.eagerRequest;
 		if (eager) return eager;
 
+		return this.executeRequest(retries, retryTimeout);
+	}
+
+	/**
+	 * The retry/timeout/dedupe machinery, starting a genuinely fresh request.
+	 * {@link Fch.makeRequest} returns the memoised eager request when there is
+	 * one; {@link Fch.poll} calls this directly, because polling must never keep
+	 * re-yielding one already-started response.
+	 */
+	private async executeRequest(
+		retries: number,
+		retryTimeout: number
+	): Promise<Response> {
 		// `abort()` cancels in-flight work, but it must not leave the builder
 		// permanently unusable: start a fresh abort generation for this request.
 		if (this.masterController.signal.aborted) {
@@ -1137,7 +1153,16 @@ export class Fch extends URL {
 					}, this.timeout);
 				}
 
-				const combinedSignal = this.combineSignals(timeoutController.signal, master, external);
+				const { signal: combinedSignal, disconnect } = this.combineSignals(
+					timeoutController.signal,
+					master,
+					external
+				);
+
+				// Set when a response interceptor throws: such a failure is a logic
+				// error, not a transport error, and must never be retried — otherwise
+				// a throwing `after()` hook would replay a POST on every attempt.
+				let interceptorError = false;
 
 				try {
 					const response = await fetch(snapshot.url, {
@@ -1165,13 +1190,23 @@ export class Fch extends URL {
 					// Response interceptors
 					let processed = response;
 					for (const interceptor of this.responseInterceptors) {
-						processed = await interceptor(processed);
+						try {
+							processed = await interceptor(processed);
+						} catch (error) {
+							interceptorError = true;
+							const errMsg = error instanceof Error ? error.message : String(error);
+							this.log('error', `Response interceptor failed:`, errMsg);
+							throw error;
+						}
 					}
 
 					this.log('info', `Received response with status ${response.status}`);
 					return processed;
 				} catch (error) {
 					if (timeoutId) clearTimeout(timeoutId);
+
+					// The response was fine; the hook was not. Propagate as final.
+					if (interceptorError) throw error;
 
 					// A deliberate abort (master controller via `abort()`, an
 					// external signal, or a bare AbortError) must never be retried.
@@ -1201,6 +1236,9 @@ export class Fch extends URL {
 					}
 
 					throw error;
+				} finally {
+					// Unhook the manual abort wiring (fallback path only).
+					disconnect();
 				}
 			}
 
@@ -1285,25 +1323,40 @@ export class Fch extends URL {
 		timeoutSignal: AbortSignal,
 		master: AbortController = this.masterController,
 		external: AbortSignal | undefined = this.externalSignal
-	): AbortSignal {
+	): { signal: AbortSignal; disconnect: () => void } {
 		const signals: AbortSignal[] = [master.signal, timeoutSignal];
 		if (external) signals.push(external);
 
+		const noop = () => {};
+
 		// Modern runtimes
 		if (typeof AbortSignal !== 'undefined' && 'any' in AbortSignal) {
-			return (AbortSignal as unknown as { any: (s: AbortSignal[]) => AbortSignal }).any(signals);
+			return {
+				signal: (AbortSignal as unknown as { any: (s: AbortSignal[]) => AbortSignal }).any(signals),
+				disconnect: noop,
+			};
 		}
 
-		// Fallback
+		// Fallback: wire the aborts by hand. The listeners are unhooked again once
+		// the attempt settles (`disconnect`), so a long-lived instance does not
+		// accumulate one listener per attempt on its master signal.
 		const combined = new AbortController();
+		const handlers: Array<[AbortSignal, () => void]> = [];
 		for (const s of signals) {
 			if (s.aborted) {
 				combined.abort(s.reason);
-				return combined.signal;
+				return { signal: combined.signal, disconnect: noop };
 			}
-			s.addEventListener('abort', () => combined.abort(s.reason), { once: true });
+			const handler = () => combined.abort(s.reason);
+			handlers.push([s, handler]);
+			s.addEventListener('abort', handler, { once: true });
 		}
-		return combined.signal;
+		return {
+			signal: combined.signal,
+			disconnect: () => {
+				for (const [s, handler] of handlers) s.removeEventListener('abort', handler);
+			},
+		};
 	}
 
 	// ============================================================
@@ -1331,8 +1384,14 @@ export class Fch extends URL {
 	catch<TResult = never>(
 		onRejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | null
 	): Promise<Response | TResult> {
-		this.log('error', 'Caught an error during the request');
-		return this.makeRequest().catch(onRejected);
+		return this.makeRequest().catch(async (error) => {
+			// Log here, inside the rejection path: `.catch()` is also used to
+			// silence expected failures, and logging eagerly would emit a bogus
+			// [ERROR] line for every successful request.
+			this.log('error', 'Caught an error during the request:', error);
+			if (!onRejected) throw error;
+			return onRejected(error);
+		});
 	}
 
 	/**
@@ -1359,8 +1418,11 @@ export class Fch extends URL {
 	 * const [users, response] = await api.json<User[]>();
 	 */
 	json<T = unknown>(): Promise<[T, Response]> {
+		// The body is read from a clone so the returned `response` stays
+		// readable for the caller — and so a second call (e.g. after `start()`
+		// memoised a single request) does not hit "Body already read".
 		return this.makeRequest().then(async (response) => [
-			(await response.json()) as T,
+			(await response.clone().json()) as T,
 			response,
 		]);
 	}
@@ -1371,7 +1433,7 @@ export class Fch extends URL {
 	 */
 	text(): Promise<[string, Response]> {
 		return this.makeRequest().then(async (response) => [
-			await response.text(),
+			await response.clone().text(),
 			response,
 		]);
 	}
@@ -1382,7 +1444,7 @@ export class Fch extends URL {
 	 */
 	blob(): Promise<[Blob, Response]> {
 		return this.makeRequest().then(async (response) => [
-			await response.blob(),
+			await response.clone().blob(),
 			response,
 		]);
 	}
@@ -1437,7 +1499,9 @@ export class Fch extends URL {
 	clone(): Fch {
 		const clone = new Fch(this.toString(), { ...this.fetchOptions });
 		clone.setHeaders(Object.fromEntries(this.headers.entries()));
-		clone.setSearchParams(Object.fromEntries(this.searchParams.entries()));
+		// `toString()` already carries every search param, including repeated
+		// values. Do not round-trip through a Record: that would collapse
+		// `?tag=a&tag=b` to `?tag=b`.
 		clone.setTimeout(this.timeout);
 		clone.setRetries(this.retries);
 		clone.setRetryDelay(this.retryDelay);
@@ -1450,15 +1514,31 @@ export class Fch extends URL {
 		clone.requestInterceptors = [...this.requestInterceptors];
 		clone.responseInterceptors = [...this.responseInterceptors];
 
-		if (this.fetchOptions.body instanceof FormData) {
+		const body = this.fetchOptions.body;
+		const contentType = this.headers.get('Content-Type') ?? undefined;
+
+		if (typeof FormData !== 'undefined' && body instanceof FormData) {
 			const formDataCopy = new FormData();
-			this.fetchOptions.body.forEach((value, key) =>
+			body.forEach((value, key) =>
 				formDataCopy.append(key, value as string | Blob)
 			);
 			clone.setFormData(formDataCopy);
-		} else if (typeof this.fetchOptions.body === 'string') {
-			clone.setBody(this.fetchOptions.body);
-		} else if (this.fetchOptions.body) {
+		} else if (typeof body === 'string') {
+			// Pass the header explicitly: `setBody(value)` alone DELETES
+			// Content-Type, so a cloned JSON request would go out untyped.
+			clone.setBody(body, contentType);
+		} else if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+			clone.setBody(new URLSearchParams(body), contentType);
+		} else if (typeof Blob !== 'undefined' && body instanceof Blob) {
+			clone.setBody(body.slice(0, body.size, body.type), contentType);
+		} else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+			// Copy the bytes; the original buffer may be reused by the caller.
+			const view = body instanceof ArrayBuffer ? new Uint8Array(body) : body;
+			clone.setBody(
+				new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)),
+				contentType
+			);
+		} else if (body) {
 			this.log('warn', 'Cannot clone non-serializable body');
 		}
 
@@ -1482,7 +1562,7 @@ export class Fch extends URL {
 	async *poll(delay = 300, abortController: AbortController = this.controller): AsyncGenerator<Response | Error> {
 		while (!abortController.signal.aborted && !this.masterController.signal.aborted) {
 			try {
-				const response = await this.makeRequest();
+				const response = await this.executeRequest(this.retries, this.retryDelay);
 				yield response;
 			} catch (error) {
 				yield error as Error;
@@ -1507,20 +1587,24 @@ export class Fch extends URL {
 	 * The instance stays awaitable and every helper (`send`, `json`, `text`, …)
 	 * resolves against this same request rather than starting another one.
 	 *
+	 * A failed eager request does NOT poison the builder: the memo is dropped so
+	 * the next call starts a fresh attempt, as {@link Fch.makeRequest} documents.
+	 *
 	 * @returns {Fch} Current instance for chaining.
 	 */
 	start(): this {
 		if (!this.eagerRequest) {
-			this.eagerRequest = this.makeRequest();
+			const eager = this.makeRequest();
+			this.eagerRequest = eager;
 			// A fire-and-forget call has no rejection handler; mark it handled so
-			// Node does not report an unhandled rejection.
-			this.eagerRequest.catch(() => {});
+			// Node does not report an unhandled rejection. On failure the memo is
+			// cleared (only if it is still ours), otherwise one rejected promise
+			// would be replayed for the rest of the instance's life.
+			eager.catch(() => {
+				if (this.eagerRequest === eager) this.eagerRequest = null;
+			});
 		}
 		return this;
-	}
-
-	toString(): string {
-		return super.toString();
 	}
 }
 
@@ -1539,7 +1623,8 @@ export class Fch extends URL {
  *   dedupe: true,
  * }).setAuthToken(token).json<User[]>();
  */
-export const fch = (url: string | URL, options: FetchRequestOptions = {}): Fch => {
+/** Plain factory; `fch` below is this function with `create()` attached. */
+const fchFn = (url: string | URL, options: FetchRequestOptions = {}): Fch => {
 	return new Fch(url, options);
 };
 
@@ -1558,7 +1643,12 @@ function resolveUrl(url: string | URL, baseUrl?: string): string | URL {
 	// Absolute URLs (with a scheme) ignore the base.
 	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
 
-	if (url.startsWith('//')) return url;
+	if (url.startsWith('//')) {
+		// Protocol-relative: resolvable only against a base. Without one, leave
+		// it for `assertAbsolute`, which explains the problem instead of letting
+		// `new URL()` fail with an opaque "Invalid URL".
+		return baseUrl ? new URL(url, baseUrl).toString() : url;
+	}
 
 	return new URL(url.replace(/^\//, ''), baseUrl.replace(/\/?$/, '/')).toString();
 }
@@ -1568,7 +1658,14 @@ function resolveUrl(url: string | URL, baseUrl?: string): string | URL {
  * letting `fetch()` fail later with an opaque error, say exactly what is missing.
  */
 function assertAbsolute(url: string): void {
-	if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) return;
+	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return;
+
+	if (url.startsWith('//')) {
+		throw new TypeError(
+			`Fch cannot resolve a protocol-relative URL ("${url}") without a base. ` +
+				`Pass a full URL, or set \`baseUrl\` via fch.create({ baseUrl }).`
+		);
+	}
 
 	const hint =
 		typeof location !== 'undefined' && location.origin
@@ -1624,12 +1721,14 @@ function toCall<T>(instance: Fch): FchCall<T> {
 	// below (and `abort()`) observes that single request instead of firing another.
 	instance.start();
 
+	// Each helper reads from a clone so the shared eager response body stays
+	// unread and several helpers can be used on the same call.
 	const json = <R>() =>
-		instance.makeRequest().then(async (r): Promise<[R, Response]> => [await r.json() as R, r]);
+		instance.makeRequest().then(async (r): Promise<[R, Response]> => [await r.clone().json() as R, r]);
 	const text = () =>
-		instance.makeRequest().then(async (r): Promise<[string, Response]> => [await r.text(), r]);
+		instance.makeRequest().then(async (r): Promise<[string, Response]> => [await r.clone().text(), r]);
 	const blob = () =>
-		instance.makeRequest().then(async (r): Promise<[Blob, Response]> => [await r.blob(), r]);
+		instance.makeRequest().then(async (r): Promise<[Blob, Response]> => [await r.clone().blob(), r]);
 	const send = () => instance.makeRequest();
 
 	const promise = instance
@@ -1651,7 +1750,10 @@ function toCall<T>(instance: Fch): FchCall<T> {
 const SHORTCUT_METHODS = ['get', 'head', 'delete', 'post', 'put', 'patch'] as const;
 type ShortcutMethod = (typeof SHORTCUT_METHODS)[number];
 
-const BODYLESS_METHODS: ReadonlySet<ShortcutMethod> = new Set(['get', 'head']);
+// `delete(url, options)` — the second argument carries options, not a body: a
+// DELETE payload is rare, and `api.request(url).setMethod('DELETE').setJsonBody(…)`
+// still covers it. Treating it as a body silently sent `{"timeout":100}` upstream.
+const BODYLESS_METHODS: ReadonlySet<ShortcutMethod> = new Set(['get', 'head', 'delete']);
 
 /** Drop shortcut-only keys so they never reach `fetch()`. */
 function toRequestOptions(options?: FchInstanceOptions): FetchRequestOptions {
@@ -1660,30 +1762,43 @@ function toRequestOptions(options?: FchInstanceOptions): FetchRequestOptions {
 	return rest;
 }
 
+/** Overlay header sets left-to-right, so shared defaults and per-call headers both apply. */
+function mergeHeaders(...sources: (HeadersInit | undefined)[]): Headers {
+	const merged = new Headers();
+	for (const source of sources) {
+		if (source) new Headers(source).forEach((value, key) => merged.set(key, value));
+	}
+	return merged;
+}
+
 /** Build the convenience methods shared by the default export and `create()`. */
-function withShortcuts(baseUrl?: string) {
-	const shortcuts = {} as Record<
-		ShortcutMethod,
-		(url: string | URL, ...rest: unknown[]) => FchCall
-	>;
+function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOptions) {
+	const shortcuts = {} as {
+		[M in ShortcutMethod]: <T = unknown>(url: string | URL, ...rest: unknown[]) => FchCall<T>;
+	};
 
 	for (const method of SHORTCUT_METHODS) {
-		shortcuts[method] = (url: string | URL, ...rest: unknown[]) => {
+		shortcuts[method] = <T>(url: string | URL, ...rest: unknown[]) => {
 			// `get(url, options)` / `post(url, body, options)`
 			const hasBody = !BODYLESS_METHODS.has(method);
 			const body = hasBody ? (rest[0] as FchBodyInput | undefined) : undefined;
 			const options = (hasBody ? rest[1] : rest[0]) as FchInstanceOptions | undefined;
 
-			const request = new Fch(
-				resolveUrl(url, options?.baseUrl ?? options?.baseURL ?? baseUrl),
-				{ ...toRequestOptions(options), method: method.toUpperCase() }
-			);
+			const request = new Fch(resolveUrl(url, options?.baseUrl ?? options?.baseURL ?? baseUrl), {
+				// Shared defaults from `create()` first, then the per-call overrides —
+				// previously the defaults were dropped here, so `create({ retries, timeout })`
+				// applied to `request()` but not to `get()`/`post()`.
+				...defaults,
+				...toRequestOptions(options),
+				headers: mergeHeaders(defaults.headers, options?.headers),
+				method: method.toUpperCase(),
+			});
 
 			if (hasBody && body !== undefined && body !== null) {
 				applyShortcutBody(request, body);
 			}
 
-			return toCall(request);
+			return toCall<T>(request);
 		};
 	}
 
@@ -1750,12 +1865,13 @@ export function create(options: FchInstanceOptions = {}) {
 	const base = baseUrl ?? baseURL;
 
 	return {
-		...withShortcuts(base),
+		...withShortcuts(base, defaults),
 		/** A fresh builder carrying the shared defaults, for chaining. */
 		request: (url: string | URL, extra: FchInstanceOptions = {}) =>
 			new Fch(resolveUrl(url, extra.baseUrl ?? extra.baseURL ?? base), {
 				...defaults,
 				...toRequestOptions(extra),
+				headers: mergeHeaders(defaults.headers, extra.headers),
 			}),
 		/** The shared defaults this instance was created with. */
 		defaults,
@@ -1771,9 +1887,12 @@ export interface FchFactory {
 }
 
 // `fch.create(...)` mirrors the ergonomics of the reference implementation without
-// giving up the URL-first behaviour of the class.
-const fchFactory = Object.assign(fch, { create }) as FchFactory;
+// giving up the URL-first behaviour of the class. `fch` is the factory WITH
+// `create()` — the same object as the default export — so named and default
+// imports expose an identical API.
+export const fch: FchFactory = Object.assign(fchFn, { create });
 
-export { fchFactory as fchWithCreate };
+/** Deprecated alias; kept because the factory has always carried `create()`. */
+export { fch as fchWithCreate };
 
-export default fchFactory;
+export default fch;

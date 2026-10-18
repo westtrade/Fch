@@ -162,7 +162,7 @@ const api = fch.create({ baseUrl: "https://api.example.com" });
 api.get("/houses");
 api.post("/houses", { name: "Cute Cottage" });   // object → JSON + Content-Type
 api.put("/houses/1", new Blob([png]));           // binary untouched
-api.delete("/houses/1");
+api.delete("/houses/1", { timeout: 5000 });      // 2nd arg is options, not a body
 
 form.onsubmit = (e) => { e.preventDefault(); api.post("/houses", e); };  // not awaited
 
@@ -176,6 +176,11 @@ api.request("/houses").setAuthToken(token).json();
 Because `Fch` extends `URL`, an absolute URL is required — either pass a full URL or
 set `baseUrl` via `fch.create()`. A relative path without a base throws a descriptive
 `TypeError` rather than an opaque `Invalid URL`.
+
+Options passed to `fch.create()` (`retries`, `timeout`, `headers`, …) apply to every
+shortcut call, and per-call options override them. `get`, `head` and `delete` take
+options as their second argument; `post`, `put` and `patch` take a body first and
+options second.
 
 ## API overview
 
