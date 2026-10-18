@@ -245,6 +245,27 @@ describe("fch.create shortcuts — the README example", () => {
 		expect(sent[0].body).toBe("<none>");
 	});
 
+	test("api.get(url, form) serialises the fields into the query", async () => {
+		const { create } = await import("../src/Fch");
+		const api = create({ baseUrl: "https://app.example.com" });
+
+		// A real <form> element, whose own properties (nodeType, tagName, action)
+		// must not reach fetch() as init keys, and whose fields must be sent.
+		const call = api.get("/search", getForm());
+
+		await vi.waitFor(() => expect(sent.length).toBe(1));
+
+		expect(sent[0].url).toBe("https://app.example.com/search?q=hello");
+		expect(sent[0].method).toBe("GET");
+		expect(sent[0].body).toBe("<none>");
+
+		// The form was consumed as a form, not mistaken for the options object.
+		const request = call.request as unknown as { fetchOptions: Record<string, unknown> };
+		for (const key of ["nodeType", "tagName", "action", "enctype", "submitter"]) {
+			expect(request.fetchOptions, key).not.toHaveProperty(key);
+		}
+	});
+
 	test("a single call resolves to the parsed body tuple", async () => {
 		const { create } = await import("../src/Fch");
 		const api = create({ baseUrl: "https://app.example.com" });

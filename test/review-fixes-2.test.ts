@@ -651,3 +651,50 @@ describe("B23 — clone() does not inherit the caller's abort signal", () => {
 		expect((clone.fetchOptions as RequestInit).signal).toBeUndefined();
 	});
 });
+
+// ---------------------------------------------------------------- B24
+
+describe("B24 — the baseURL alias keeps working from one place", () => {
+	const api = () => create({ baseURL: B, timeout: 7 });
+
+	test("create({ baseURL }) applies to shortcuts", async () => {
+		const seen: string[] = [];
+		globalThis.fetch = vi.fn(async (url: string) => {
+			seen.push(url);
+			return ok();
+		}) as unknown as typeof fetch;
+
+		await api().get("/x").send();
+
+		expect(seen[0]).toBe(`${B}/x`);
+	});
+
+	test("create({ baseURL }) applies to request()", () => {
+		expect(api().request("/y").toString()).toBe(`${B}/y`);
+	});
+
+	test("a per-call baseURL overrides the shared base", () => {
+		expect(
+			create({ baseUrl: B }).request("/z", { baseURL: "https://other.test" }).toString()
+		).toBe("https://other.test/z");
+	});
+
+	test("baseUrl wins when both spellings are given", () => {
+		const mixed = create({ baseUrl: "https://a.test", baseURL: "https://b.test" });
+
+		expect(mixed.request("/p").toString()).toBe("https://a.test/p");
+	});
+
+	test("neither key leaks into the fetch init", async () => {
+		const seen: RequestInit[] = [];
+		globalThis.fetch = vi.fn(async (_url: string, init: RequestInit) => {
+			seen.push(init);
+			return ok();
+		}) as unknown as typeof fetch;
+
+		await create({ baseURL: B, timeout: 5 }).get("/x").send();
+
+		expect(Object.keys(seen[0])).not.toContain("baseURL");
+		expect(Object.keys(seen[0])).not.toContain("baseUrl");
+	});
+});

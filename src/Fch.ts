@@ -1813,10 +1813,22 @@ type ShortcutMethod = (typeof SHORTCUT_METHODS)[number];
 // still covers it. Treating it as a body silently sent `{"timeout":100}` upstream.
 const BODYLESS_METHODS: ReadonlySet<ShortcutMethod> = new Set(['get', 'head', 'delete']);
 
+/**
+ * Fold the `baseURL` spelling into `baseUrl` once, at the API boundary, so the
+ * rest of the file reads a single property. `baseURL` is a shipped alias
+ * (v1.1.0) and stays public; it just no longer has to be re-checked everywhere.
+ */
+function withBaseAlias(options: FchInstanceOptions = {}): FchInstanceOptions {
+	const { baseURL, ...rest } = options;
+	return baseURL !== undefined && rest.baseUrl === undefined
+		? { ...rest, baseUrl: baseURL }
+		: rest;
+}
+
 /** Drop shortcut-only keys so they never reach `fetch()`. */
 function toRequestOptions(options?: FchInstanceOptions): FetchRequestOptions {
 	if (!options) return {};
-	const { baseUrl, baseURL, ...rest } = options;
+	const { baseUrl, ...rest } = options;
 	return rest;
 }
 
@@ -1846,33 +1858,23 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 			// string. Without this `api.get(url, form)` sent nothing at all and
 			// leaked the form's own properties into the `fetch()` init object.
 			const form = !hasBody && first != null ? toFormData(first) : null;
-			if (form) {
-				const options = rest[1] as FchInstanceOptions | undefined;
-				const request = new Fch(resolveUrl(url, options?.baseUrl ?? options?.baseURL ?? baseUrl), {
-					...defaults,
-					...toRequestOptions(options),
-					headers: mergeHeaders(defaults.headers, options?.headers),
-					method: method.toUpperCase(),
-				});
-				// Put the fields in the query string, exactly as a GET form submit
-				// does. No body, and no form-object properties reach `fetch()`.
-				request.appendFormToQuery(form);
-				return toCall<T>(request);
-			}
+			const options = withBaseAlias(
+				(form || hasBody ? rest[1] : rest[0]) as FchInstanceOptions | undefined
+			);
 
-			const options = (hasBody ? rest[1] : rest[0]) as FchInstanceOptions | undefined;
-
-			const request = new Fch(resolveUrl(url, options?.baseUrl ?? options?.baseURL ?? baseUrl), {
-				// Shared defaults from `create()` first, then the per-call overrides —
-				// previously the defaults were dropped here, so `create({ retries, timeout })`
-				// applied to `request()` but not to `get()`/`post()`.
+			const request = new Fch(resolveUrl(url, options.baseUrl ?? baseUrl), {
+				// Shared defaults from `create()` first, then the per-call overrides.
 				...defaults,
 				...toRequestOptions(options),
-				headers: mergeHeaders(defaults.headers, options?.headers),
+				headers: mergeHeaders(defaults.headers, options.headers),
 				method: method.toUpperCase(),
 			});
 
-			if (hasBody && first !== undefined && first !== null) {
+			if (form) {
+				// Put the fields in the query string, exactly as a GET form submit
+				// does. No body, and no form-object properties reach `fetch()`.
+				request.appendFormToQuery(form);
+			} else if (hasBody && first !== undefined && first !== null) {
 				applyShortcutBody(request, first);
 			}
 
@@ -1898,11 +1900,11 @@ function applyShortcutBody(request: Fch, body: FchBodyInput): void {
 		return;
 	}
 
+	// `isNativeBody` already covers ArrayBuffer and every ArrayBuffer view, so
+	// only the Node-stream shape needs its own check here.
 	const isPlainData =
 		typeof body === 'object' &&
 		!isNativeBody(body) &&
-		!ArrayBuffer.isView(body) &&
-		!(body instanceof ArrayBuffer) &&
 		typeof (body as { pipe?: unknown }).pipe !== 'function';
 
 	if (isPlainData) {
@@ -1939,18 +1941,20 @@ const isStreamBody = (body: unknown): boolean =>
  * `request()` for a fresh builder with the same defaults.
  */
 export function create(options: FchInstanceOptions = {}) {
-	const { baseUrl, baseURL, ...defaults } = options;
-	const base = baseUrl ?? baseURL;
+	const { baseUrl, ...defaults } = withBaseAlias(options);
+	const base = baseUrl;
 
 	return {
 		...withShortcuts(base, defaults),
 		/** A fresh builder carrying the shared defaults, for chaining. */
-		request: (url: string | URL, extra: FchInstanceOptions = {}) =>
-			new Fch(resolveUrl(url, extra.baseUrl ?? extra.baseURL ?? base), {
+		request: (url: string | URL, extra: FchInstanceOptions = {}) => {
+			const merged = withBaseAlias(extra);
+			return new Fch(resolveUrl(url, merged.baseUrl ?? base), {
 				...defaults,
-				...toRequestOptions(extra),
-				headers: mergeHeaders(defaults.headers, extra.headers),
-			}),
+				...toRequestOptions(merged),
+				headers: mergeHeaders(defaults.headers, merged.headers),
+			});
+		},
 		/** The shared defaults this instance was created with. */
 		defaults,
 	};
