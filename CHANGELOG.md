@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/westtrade/Fch/compare/v1.2.5...v1.3.0) (2026-10-19)
+
+
+### Features
+
+* add a tagged-template entry point at @westtrade/fch/literal ([1afb474](https://github.com/westtrade/Fch/commit/1afb4743e9aae6b150897510bf6175f191dc8ddd))
+
 ## [1.2.5](https://github.com/westtrade/Fch/compare/v1.2.4...v1.2.5) (2026-10-19)
 
 
