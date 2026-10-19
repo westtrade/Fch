@@ -217,6 +217,11 @@ options second.
 | Lifecycle | `abort()`, `aborted`, `clone()`, `start()` |
 | Polling | `poll(delay?)` — async generator of repeated responses; `delay` is used exactly, not clamped by `maxRetryDelay` |
 
+## Roadmap
+
+The three positioning goals (AI-first token economy, human-first simplicity,
+minimal bundle size) are tracked with measurements in [ROADMAP.md](ROADMAP.md).
+
 ## License
 
 MIT
