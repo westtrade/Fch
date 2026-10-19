@@ -1227,17 +1227,20 @@ export class Fch extends URL {
 						continue;
 					}
 
-					// Response interceptors
+					// Response interceptors. One try around the whole chain: a
+					// throwing hook is a logic error, not a transport error, and
+					// `interceptorError` keeps the retry policy below from replaying
+					// a POST on every attempt.
 					let processed = response;
-					for (const interceptor of this.responseInterceptors) {
-						try {
+					try {
+						for (const interceptor of this.responseInterceptors) {
 							processed = await interceptor(processed);
-						} catch (error) {
-							interceptorError = true;
-							const errMsg = error instanceof Error ? error.message : String(error);
-							this.log('error', `Response interceptor failed:`, errMsg);
-							throw error;
 						}
+					} catch (error) {
+						interceptorError = true;
+						const errMsg = error instanceof Error ? error.message : String(error);
+						this.log('error', `Response interceptor failed:`, errMsg);
+						throw error;
 					}
 
 					this.log('info', `Received response with status ${response.status}`);
@@ -1467,6 +1470,10 @@ export class Fch extends URL {
 	 * Run the request and read its body from a *clone*, so the returned
 	 * `Response` stays readable for the caller — and so a second call (e.g. after
 	 * `start()` memoised a single request) does not hit "Body already read".
+	 *
+	 * ponytail: the body is buffered twice (clone + original), which doubles peak
+	 * memory for large payloads. `json`/`text` need the buffer anyway; for
+	 * `blob()` on big downloads, read `await api.send()` and consume it directly.
 	 */
 	private tuple<T>(read: (response: Response) => Promise<T>): Promise<[T, Response]> {
 		return this.makeRequest().then(async (response) => [await read(response.clone()), response]);
@@ -1891,9 +1898,12 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
  * - anything else → handed to `fetch()` as-is
  */
 function applyShortcutBody(request: Fch, body: FchBodyInput): void {
-	if (toFormData(body)) {
+	// Build the FormData once: `setFormData` would otherwise call `toFormData`
+	// again, reading the whole form a second time on every submit.
+	const formData = toFormData(body);
+	if (formData) {
 		const intendedMethod = request.method;
-		request.setFormData(body as FormData | FormLike);
+		request.setFormData(formData);
 		request.setMethod(intendedMethod);
 		return;
 	}

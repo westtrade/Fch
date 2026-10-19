@@ -373,3 +373,33 @@ describe("body handling regressions", () => {
 		await vi.waitFor(() => expect(duplex).toBe("half"));
 	});
 });
+
+describe("form bodies are read once per submit", () => {
+	test("post(url, form) builds the FormData a single time", async () => {
+		const { create } = await import("../src/Fch");
+
+		// Count constructions by wrapping the realm's FormData.
+		const RealFormData = dom.window.FormData;
+		let constructed = 0;
+		class CountingFormData extends RealFormData {
+			constructor(...args: ConstructorParameters<typeof RealFormData>) {
+				constructed += 1;
+				super(...args);
+			}
+		}
+		const globalScope = globalThis as unknown as { FormData: unknown };
+		const previous = globalScope.FormData;
+		globalScope.FormData = CountingFormData;
+
+		try {
+			create({ baseUrl: "https://app.example.com" }).post("/houses", form());
+			await vi.waitFor(() => expect(sent.length).toBe(1));
+		} finally {
+			globalScope.FormData = previous;
+		}
+
+		// Once for the body, never twice: the old code converted the form, then
+		// handed the original element to setFormData, which converted it again.
+		expect(constructed).toBe(1);
+	});
+});
