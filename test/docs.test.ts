@@ -144,6 +144,28 @@ describe("documentation site", () => {
 		expect(gettingStarted).toContain('from "@westtrade/fch"');
 	});
 
+	test("the documented install tag matches the released version", () => {
+		// The install line pins a release tag. If the version is bumped by
+		// semantic-release and the docs are not updated, readers pin a stale tag
+		// that may predate fixes (v1.2.4 predates `prepare`, so it installs an
+		// unimportable package). Keep the two in lockstep.
+		const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+		const expected = `#v${pkg.version}`;
+
+		const sources = [
+			{ name: "getting-started", body: pages.find((p) => p.slug === "getting-started")!.body },
+			{ name: "Readme.md", body: readFileSync(resolve(root, "Readme.md"), "utf8") },
+		];
+
+		for (const { name, body } of sources) {
+			const pinned = [...body.matchAll(/#v(\d+\.\d+\.\d+)/g)].map((m) => m[0]);
+			expect(pinned.length, `${name} has no pinned install tag`).toBeGreaterThan(0);
+			for (const tag of new Set(pinned)) {
+				expect(tag, `${name} pins ${tag}, but package.json is ${pkg.version}`).toBe(expected);
+			}
+		}
+	});
+
 	test("the package is buildable from a git install", () => {
 		// A git install runs `prepare`, not `prepublishOnly`; without it the
 		// installed package has no dist/ and cannot be imported. This is a

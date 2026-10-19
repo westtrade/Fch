@@ -13,7 +13,8 @@
 		"site:check": "node scripts/check-all.mjs && node scripts/check-visual.mjs && node scripts/check-interactions.mjs && node scripts/check-file-protocol.mjs",
 		"prepublishOnly": "npm run build",
 		"prepare": "npm run build",
-		"site:check:subpath": "node scripts/check-subpath.mjs"
+		"site:check:subpath": "node scripts/check-subpath.mjs",
+		"site:check:live": "node scripts/check-live.mjs"
 	},
 	"keywords": [
 		"fetch",
