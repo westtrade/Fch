@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/westtrade/Fch/compare/v1.6.0...v1.7.0) (2026-10-19)
+
+
+### Features
+
+* Superforms-style loading timers, as getters and as store keys ([5498909](https://github.com/westtrade/Fch/commit/54989092e0e0f926057b7abf6182348c63a6d73a))
+
 # [1.6.0](https://github.com/westtrade/Fch/compare/v1.5.1...v1.6.0) (2026-10-19)
 
 
