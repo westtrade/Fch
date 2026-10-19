@@ -1,3 +1,10 @@
+## [1.13.1](https://github.com/westtrade/Fch/compare/v1.13.0...v1.13.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **poll:** give each poll its own stop signal ([78603ab](https://github.com/westtrade/Fch/commit/78603abb76cee72531e768d7c0a2970ddd9e4187))
+
 # [1.13.0](https://github.com/westtrade/Fch/compare/v1.12.0...v1.13.0) (2026-10-19)
 
 
