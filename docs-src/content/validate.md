@@ -1,9 +1,32 @@
-# Response validation
+# Validation
 
-A request can succeed on the wire and still return the wrong shape. Validation
-turns that into a normal rejection, so it reaches `.catch()`, every `onError`
-hook, and the [Nano Stores](nanostores.md) plugin — the same path as a network
-error.
+Validate either side of the request:
+
+- **`'formData'`** — the request body, checked **before** it is sent. An invalid
+  form never reaches the network.
+- **`'response'`** — the parsed reply, checked after it arrives. A request can
+  succeed on the wire and still return the wrong shape.
+
+Both turn a mismatch into a normal rejection, so it reaches `.catch()`, every
+`onError` hook, and the [Nano Stores](nanostores.md) plugin — the same path as a
+network error.
+
+```ts
+use(validate('formData', rules));   // before sending
+use(validate('response', rules));   // after receiving
+```
+
+Need both? Attach both. Each target registers as a separate plugin
+(`validate:formData`, `validate:response`), so two `use()` calls coexist.
+
+```ts
+const req = new Fch("https://api.example.com/houses", { method: "POST" })
+	.use(validate("formData", { schema: formRules }))
+	.use(validate("response", { schema: houseSchema }));
+```
+
+`validate(rules)` without a target still means `'response'`, so existing code
+keeps working.
 
 ```ts
 import { Fch } from "@westtrade/fch";
@@ -32,6 +55,68 @@ try {
 	}
 }
 ```
+
+## Validating FormData
+
+The body is checked in `onRequest`, which runs before the first attempt — so an
+invalid form never reaches the network, and a retry cannot slip past it.
+
+```ts
+const [created] = await new Fch("https://api.example.com/houses", { method: "POST" })
+	.use(
+		validate("formData", {
+			schema: {
+				type: "object",
+				required: ["name", "rooms"],
+				properties: {
+					name: { type: "string", minLength: 1, maxLength: 80 },
+					rooms: { type: "string", pattern: "^[0-9]+$" },
+				},
+			},
+		}),
+	)
+	.setFormData("#new-house")
+	.json<House>();
+```
+
+Browser form values are **strings**, even for `<input type="number">`, so use
+`pattern` or convert in a custom validator rather than `type: "number"`:
+
+```ts
+validate("formData", {
+	validate: (fields) => {
+		const rooms = Number(fields.rooms);
+		if (!Number.isInteger(rooms) || rooms < 1) {
+			throw new TypeError("rooms: expected a positive integer");
+		}
+	},
+});
+```
+
+### What a validator receives
+
+`FormData` is flattened into a plain object:
+
+| Field | Value |
+| --- | --- |
+| text input, `<select>`, checkbox | `string` |
+| repeated names | the **last** value wins |
+| file input | `{ name, size, type }` — metadata, not bytes |
+
+Files are described rather than passed, because a schema cannot meaningfully
+compare bytes. Check `name`/`size`/`type` to assert that a file was attached.
+
+The failure differs from a response failure in one way:
+
+```ts
+error.target;   // 'formData'
+error.response; // undefined — nothing was sent, so there is no response
+error.body;     // { rooms: 'abc' }
+error.message;  // 'FormData validation failed — city: is required'
+```
+
+A request **without** a form body (a JSON or binary payload) is skipped, not
+failed: there is nothing to check field by field.
 
 ## Two ways to validate
 
@@ -123,9 +208,10 @@ keeps working.
 
 | Member | Value |
 | --- | --- |
-| `message` | `Response validation failed — path: reason` |
+| `message` | `FormData validation failed — path: reason` or `Response …` |
 | `issues` | `{ path, message }[]`, path is dotted (`items.0.id`) |
-| `response` | the `Response` that carried the invalid body |
+| `target` | `'formData'` or `'response'` |
+| `response` | the `Response`; `undefined` for a form failure |
 | `body` | the parsed body (unless `keepBody: false`) |
 
 `keepBody: false` keeps large bodies out of your logs.

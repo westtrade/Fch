@@ -212,7 +212,25 @@ describe("validate plugin", () => {
 	});
 
 	test("requires a schema or a validate function", () => {
-		expect(() => validate({})).toThrow(/needs a `schema`.*or a `validate\(body, response\)`/);
+		expect(() => validate({})).toThrow(/needs a `schema`.*or a `validate\(value, response\?\)`/);
+		expect(() => validate("formData", {})).toThrow(/validate\('formData'/);
+	});
+
+	test("rejects an unknown target", () => {
+		expect(() => validate("nope" as never, { schema: {} })).toThrow(
+			/target must be 'formData' or 'response'/,
+		);
+	});
+
+	test("the target defaults to response (back-compatible call)", async () => {
+		globalThis.fetch = json({ id: 1 });
+
+		const req = new Fch("https://api.example.com/x").use(validate({ schema: houseSchema }));
+		expect(req.plugins).toEqual(["validate:response"]);
+
+		const error = (await req.json().catch((e: unknown) => e)) as ValidationError;
+		expect(error).toBeInstanceOf(ValidationError);
+		expect(error.target).toBe("response");
 	});
 });
 

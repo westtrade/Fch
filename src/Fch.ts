@@ -1429,9 +1429,14 @@ export class Fch extends URL {
 		// `.json()`, `.send()`, shortcuts and the tagged template) because they
 		// all funnel through here.
 		this.startTimers();
-		for (const hook of this.pluginHooks.request) hook(this);
 
 		try {
+			// Request hooks run INSIDE the try: a hook may reject on purpose —
+			// form validation does — and that rejection must reach onError and
+			// stop the timers exactly like any other failure. Outside the try it
+			// left the timer stuck in `submitting` and skipped onError.
+			for (const hook of this.pluginHooks.request) hook(this);
+
 			const response = await this.makeRequestInner();
 			if (this.pluginHooks.success.length) {
 				// Read a clone so the caller's body stays unconsumed.

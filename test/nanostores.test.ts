@@ -403,3 +403,60 @@ describe("custom fetch", () => {
 		expect(hits).toBe(2);
 	});
 });
+
+describe("request hooks that reject", () => {
+	// A plugin may reject on purpose (form validation does). That rejection must
+	// reach onError and reset the timers, not escape before the try block.
+	test("a throwing onRequest hook blocks the request and settles the timers", async () => {
+		let fetched = 0;
+		globalThis.fetch = (async () => {
+			fetched++;
+			return new Response("{}");
+		}) as unknown as typeof fetch;
+
+		let seen: unknown = null;
+		const blocker = {
+			name: "blocker",
+			install({ onRequest }: { onRequest: (fn: () => void) => void }) {
+				onRequest(() => {
+					throw new TypeError("invalid form");
+				});
+			},
+		};
+		const probe = {
+			name: "probe",
+			install({ onError }: { onError: (fn: (e: unknown) => void) => void }) {
+				onError((e) => (seen = e));
+			},
+		};
+
+		const req = new Fch("https://api.example.com/x").use(probe as never).use(blocker as never);
+
+		await expect(req.send()).rejects.toThrow("invalid form");
+
+		expect(fetched, "the request must not be sent").toBe(0);
+		expect(seen).toBeInstanceOf(TypeError);
+		expect(req.timer, "the timer must not stay in submitting").toBe("idle");
+	});
+
+	test("the store records the hook failure", async () => {
+		globalThis.fetch = (async () => new Response("{}")) as unknown as typeof fetch;
+
+		const req = new Fch("https://api.example.com/x")
+			.use(nanostores())
+			.use({
+				name: "blocker",
+				install({ onRequest }: { onRequest: (fn: () => void) => void }) {
+					onRequest(() => {
+						throw new TypeError("invalid form");
+					});
+				},
+			} as never);
+
+		await req.json().catch(() => {});
+
+		expect(req.get().error?.message).toBe("invalid form");
+		expect(req.get().loading).toBe(false);
+		expect(req.get().timer).toBe("idle");
+	});
+});

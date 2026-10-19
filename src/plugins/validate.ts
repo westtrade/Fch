@@ -22,7 +22,7 @@
  * AJV, Zod, Valibot or a hand-written check; the built-in `schema` path is a
  * small JSON-Schema subset so the common case needs no dependency at all.
  */
-import type { Plugin, PluginApi } from '../Fch';
+import type { Fch, Plugin, PluginApi } from '../Fch';
 
 /** A JSON-Schema-like description, for the dependency-free path. */
 export interface SimpleSchema {
@@ -66,22 +66,39 @@ export interface ValidationIssue {
  */
 export class ValidationError extends TypeError {
 	readonly issues: ValidationIssue[];
-	readonly response: Response;
-	/** The body that failed, for logging. */
+	/**
+	 * The response that carried the invalid body.
+	 * `undefined` when a request body (FormData) failed before sending, since no
+	 * response exists yet.
+	 */
+	readonly response: Response | undefined;
+	/** What to validate: `formData` failed before sending, `response` after. */
+	readonly target: ValidationTarget;
+	/** The value that failed, for logging. */
 	readonly body: unknown;
 
-	constructor(issues: ValidationIssue[], response: Response, body: unknown) {
+	constructor(
+		issues: ValidationIssue[],
+		target: ValidationTarget,
+		response: Response | undefined,
+		body: unknown,
+	) {
 		const summary =
 			issues.length === 1
 				? `${issues[0].path || 'body'}: ${issues[0].message}`
 				: `${issues.length} validation errors, first: ${issues[0].path || 'body'}: ${issues[0].message}`;
-		super(`Response validation failed — ${summary}`);
+		const label = target === 'formData' ? 'FormData' : 'Response';
+		super(`${label} validation failed — ${summary}`);
 		this.name = 'ValidationError';
 		this.issues = issues;
+		this.target = target;
 		this.response = response;
 		this.body = body;
 	}
 }
+
+/** What to validate: the request body before sending, or the response after. */
+export type ValidationTarget = 'formData' | 'response';
 
 export interface ValidateOptions<T = unknown> {
 	/** A JSON-Schema-like description, checked by the built-in validator. */
@@ -128,53 +145,128 @@ function toIssues(result: unknown): ValidationIssue[] | null {
  *
  * @param options - A schema, a `validate` function, or both.
  */
-export function validate<T = unknown>(options: ValidateOptions<T>): Plugin {
-	if (!options.schema && typeof options.validate !== 'function') {
+export function validate<T = unknown>(options: ValidateOptions<T>): Plugin;
+export function validate<T = unknown>(
+	target: ValidationTarget,
+	options: ValidateOptions<T>,
+): Plugin;
+export function validate<T = unknown>(
+	targetOrOptions: ValidationTarget | ValidateOptions<T>,
+	maybeOptions?: ValidateOptions<T>,
+): Plugin {
+	// Two call shapes:
+	//   validate('response', rules)  — explicit target (recommended)
+	//   validate(rules)              — the original response-only form
+	const target: ValidationTarget =
+		typeof targetOrOptions === 'string' ? targetOrOptions : 'response';
+	const options: ValidateOptions<T> =
+		typeof targetOrOptions === 'string'
+			? (maybeOptions ?? {})
+			: targetOrOptions;
+
+	if (target !== 'formData' && target !== 'response') {
 		throw new TypeError(
-			'validate() needs a `schema` (JSON-Schema-like) or a `validate(body, response)` function.',
+			`validate() target must be 'formData' or 'response', got "${target}".`,
 		);
 	}
 
+	if (!options.schema && typeof options.validate !== 'function') {
+		throw new TypeError(
+			`validate('${target}', …) needs a \`schema\` (JSON-Schema-like) or a ` +
+				'`validate(value, response?)` function.',
+		);
+	}
+
+	// The name carries the target: validating both the form and the response
+	// means two use() calls, and use() skips a duplicate name.
+	return target === 'formData'
+		? formDataPlugin(options)
+		: responsePlugin(options);
+}
+
+/** Validate the FormData before the request is sent. */
+function formDataPlugin<T>(options: ValidateOptions<T>): Plugin {
 	return {
-		name: 'validate',
+		name: 'validate:formData',
 
-		install({ onSuccess }: PluginApi): void {
-			onSuccess((body, response) => {
-				if (options.when && !options.when(response)) return;
+		install({ onRequest }: PluginApi): void {
+			onRequest((request) => {
+				// Only a form body can be validated here: a JSON or binary body is
+				// not FormData, and there is nothing to check field by field.
+				const data = request.formData;
+				if (!data) return;
 
-				// A custom validator wins, so AJV/Zod users are not second-guessed.
-				if (typeof options.validate === 'function') {
-					let result: unknown;
-					try {
-						result = options.validate(body, response);
-					} catch (error) {
-						// Zod/Valibot throw on invalid input: surfacing their error
-						// untouched keeps messages and issue lists intact.
-						throw error;
-					}
-					const issues = toIssues(result);
-					if (issues) {
-						throw new ValidationError(
-							issues,
-							response,
-							options.keepBody === false ? undefined : body,
-						);
-					}
-					return;
-				}
+				const value = Object.fromEntries(
+					[...data.entries()].map(([key, entry]) => [
+						key,
+						// Files carry bytes, not a comparable value; describe them so a
+						// schema can still say "a File is required".
+						typeof entry === 'string' ? entry : { name: entry.name, size: entry.size, type: entry.type },
+					]),
+				);
 
-				const issues = checkSchema(body, options.schema!, '');
-				if (issues.length) {
-					throw new ValidationError(
-						issues,
-						response,
-						options.keepBody === false ? undefined : body,
-					);
-				}
+				validateValue(value, options, undefined, 'FormData');
 			});
 		},
 	};
 }
+
+/** Validate the parsed response body. */
+function responsePlugin<T>(options: ValidateOptions<T>): Plugin {
+	return {
+		name: 'validate:response',
+
+		install({ onSuccess }: PluginApi): void {
+			onSuccess((body, response) => {
+				if (options.when && !options.when(response)) return;
+				validateValue(body, options, response, 'response');
+			});
+		},
+	};
+}
+
+/**
+ * Run the configured validator against `value` and throw on failure.
+ * Shared by both targets, so schema handling cannot drift between them.
+ */
+function validateValue<T>(
+	value: unknown,
+	options: ValidateOptions<T>,
+	response: Response | undefined,
+	label: string,
+): void {
+	// A custom validator wins, so AJV/Zod users are not second-guessed.
+	const target: ValidationTarget = label === 'FormData' ? 'formData' : 'response';
+
+	if (typeof options.validate === 'function') {
+		const result = options.validate(value, response as Response);
+		const issues = toIssues(result);
+		if (issues) throw rejectWith(issues, target, response, value, options);
+		return;
+	}
+
+	const issues = checkSchema(value, options.schema!, '');
+	if (issues.length) throw rejectWith(issues, target, response, value, options);
+}
+
+/** Build the error for a failure on either target. */
+function rejectWith<T>(
+	issues: ValidationIssue[],
+	target: ValidationTarget,
+	response: Response | undefined,
+	value: unknown,
+	options: ValidateOptions<T>,
+): ValidationError {
+	return new ValidationError(
+		issues,
+		target,
+		response,
+		options.keepBody === false ? undefined : value,
+	);
+}
+
+/** The default target when `validate(rules)` is called without one. */
+export const DEFAULT_TARGET: ValidationTarget = 'response';
 
 /**
  * A small JSON-Schema subset, so `validate({ schema })` works with no extra

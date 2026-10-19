@@ -86,10 +86,12 @@ const req = new Fch(url).use(nanostores());
 req.get();          // { loading, data, error, timer, delayed, timedOut, response }
 await req.json();
 
-// validation: invalid body rejects through .catch / onError / the store
-new Fch(url).use(validate({
-  schema: { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
-})).json();
+// validation: 'formData' checks before sending, 'response' after receiving.
+// Attach both with two use() calls; omit the target for 'response'.
+new Fch(url)
+  .use(validate("formData", { schema: { type: "object", required: ["name"] } }))
+  .use(validate("response", { schema: { type: "object", required: ["id"] } }))
+  .json();
 
 // custom deprecated aliases (not in core)
 new Fch(url).use(compat()).setRetryTimeout(500);
