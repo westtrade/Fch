@@ -149,4 +149,4 @@ dist
 site/
 
 # Local npm cache used when installing offline
-.npmcache/
+.npmcache*/
