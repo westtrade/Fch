@@ -68,4 +68,16 @@ export default mod.validate
 `,
 )
 
+writeFileSync(
+	resolve(dist, 'plugins/compat.mjs'),
+	`// ESM wrapper around the CommonJS build (generated).
+import mod from './compat.js'
+
+export const compat = mod.compat
+export const DEPRECATED_MEMBERS = mod.DEPRECATED_MEMBERS
+
+export default mod.compat
+`,
+)
+
 console.log('dist/Fch.mjs, dist/Fch.literal.mjs and dist/plugins/*.mjs written')

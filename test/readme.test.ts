@@ -122,7 +122,7 @@ describe("Readme examples", () => {
 			"setHeader", "setHeaders", "getHeader", "deleteHeader", "setAuthToken", "setBasicAuth",
 			"setMethod", "setTimeout", "setRetries", "setRetryDelay", "setMaxRetryDelay",
 			"setRetryOn", "setFetchOptions", "setCORS", "disableCache",
-			"setDedupeKey", "setIdempotencyKey",
+			"setDedupeKey",
 			"before", "after",
 			"getLogger", "setLogger", "enableLogging", "disableLogging",
 			"abort", "clone", "start",
@@ -134,8 +134,9 @@ describe("Readme examples", () => {
 		expect("aborted" in req).toBe(true);
 	});
 
-	test("the deprecated aliases still work", async () => {
-		const req = new Fch("https://api.example.com/x");
+	test("the deprecated aliases still work, from the compat plugin", async () => {
+		const { compat } = await import("../src/plugins/compat");
+		const req = new Fch("https://api.example.com/x").use(compat());
 
 		// Called, not merely present: the alias must delegate to before()/after()
 		// and take effect during a real request.
@@ -144,6 +145,50 @@ describe("Readme examples", () => {
 
 		await req.makeRequest();
 		expect(new Headers(calls[0].init.headers).get("X-Via-Alias")).toBe("1");
+	});
+
+	test("the deprecated methods are gone from the core", () => {
+		// They cost every user bytes they never call. They live in the compat
+		// plugin now, so a request without it must not expose them.
+		const req = new Fch("https://api.example.com/x") as never as Record<string, unknown>;
+		for (const name of [
+			"setRetryTimeout",
+			"setIdempotencyKey",
+			"addRequestInterceptor",
+			"addResponseInterceptor",
+		]) {
+			expect(req[name], name).toBeUndefined();
+		}
+	});
+
+	test("the compat plugin adds all four aliases", async () => {
+		const { compat, DEPRECATED_MEMBERS } = await import("../src/plugins/compat");
+		const req = new Fch("https://api.example.com/x").use(compat()) as never as Record<string, unknown>;
+
+		for (const name of DEPRECATED_MEMBERS) {
+			expect(typeof req[name], name).toBe("function");
+		}
+	});
+
+	test("the compat aliases delegate to their replacements", async () => {
+		const { compat } = await import("../src/plugins/compat");
+		const req = new Fch("https://api.example.com/x").use(compat());
+
+		req.setRetryTimeout(750).setRetryDelay(750);
+		expect(req.retryDelay).toBe(750);
+
+		req.setIdempotencyKey(() => "k");
+		// Same slot as setDedupeKey, so `dedupe: true` would honour it.
+		expect(typeof req.dedupeKey).toBe("function");
+	});
+
+	test("attaching compat twice does not replace the aliases", async () => {
+		const { compat } = await import("../src/plugins/compat");
+		const plugin = compat();
+		const req = new Fch("https://api.example.com/x").use(plugin).use(plugin) as never as Record<string, unknown>;
+
+		expect(req.setRetryTimeout).toBeDefined();
+		expect((req as { plugins?: string[] }).plugins).toEqual(["compat"]);
 	});
 
 	test("the documented fch.create shortcuts exist", async () => {

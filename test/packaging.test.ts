@@ -186,6 +186,36 @@ describe("published package", () => {
 		expect(out.issueCount).toBeGreaterThan(0);
 	});
 
+	test("the compat plugin resolves and adds the aliases", async () => {
+		const app = join(workdir, "app");
+		const script = join(app, "compat.mjs");
+		writeFileSync(
+			script,
+			`
+			import compat, { DEPRECATED_MEMBERS } from "@westtrade/fch/plugins/compat";
+			import { Fch } from "@westtrade/fch";
+
+			const withoutPlugin = new Fch("https://x.test/y");
+			const withPlugin = new Fch("https://x.test/y").use(compat());
+
+			const out = {
+				names: DEPRECATED_MEMBERS,
+				absentInCore: DEPRECATED_MEMBERS.every((n) => typeof withoutPlugin[n] === "undefined"),
+				presentInPlugin: DEPRECATED_MEMBERS.every((n) => typeof withPlugin[n] === "function"),
+			};
+			withPlugin.setRetryTimeout(900);
+			out.retryDelay = withPlugin.retryDelay;
+			console.log(JSON.stringify(out));
+			`,
+		);
+
+		const out = JSON.parse(run(app, [script]).trim().split("\n").pop()!);
+		expect(out.names).toHaveLength(4);
+		expect(out.absentInCore).toBe(true);
+		expect(out.presentInPlugin).toBe(true);
+		expect(out.retryDelay).toBe(900);
+	});
+
 	test("CJS: require() of both entries works", () => {
 		const app = join(workdir, "app");
 		const script = join(app, "cjs.cjs");

@@ -211,8 +211,9 @@ options second.
 | Shortcuts | `fch.create({ baseUrl })` → `get()`, `head()`, `post()`, `put()`, `patch()`, `delete()`, `request()` |
 | Headers | `setHeader()`, `setHeaders()`, `getHeader()`, `deleteHeader()`, `setAuthToken()`, `setBasicAuth()` |
 | Request config | `setMethod()`, `setTimeout()`, `setRetries()`, `setRetryDelay()`, `setMaxRetryDelay()`, `setRetryOn()`, `setFetchOptions()`, `setCORS()`, `disableCache()` |
-| Dedupe | `setDedupeKey()`, `setIdempotencyKey()` (deprecated alias) |
-| Interceptors | `before()`, `after()` — `addRequestInterceptor()`/`addResponseInterceptor()` are deprecated aliases |
+| Dedupe | `setDedupeKey()` |
+| Interceptors | `before()`, `after()` |
+| Deprecated aliases | `@westtrade/fch/plugins/compat` — `setRetryTimeout`, `setIdempotencyKey`, `addRequestInterceptor`, `addResponseInterceptor` |
 | Logging | `getLogger()`, `setLogger()`, `enableLogging()`, `disableLogging()` |
 | Lifecycle | `abort()`, `aborted`, `clone()`, `start()` |
 | Polling | `poll(delay?)` — async generator of repeated responses; `delay` is used exactly, not clamped by `maxRetryDelay` |

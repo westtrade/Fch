@@ -1001,11 +1001,6 @@ export class Fch extends URL {
 		return this;
 	}
 
-	/** @deprecated Use `setDedupeKey`. */
-	setIdempotencyKey(key: string | (() => string)): this {
-		return this.setDedupeKey(key);
-	}
-
 	// ============================================================
 	// Fetch options
 	// ============================================================
@@ -1123,11 +1118,6 @@ export class Fch extends URL {
 		if (!Number.isFinite(ms) || ms < 0) throw new Error(`Invalid retryDelay: ${ms}`);
 		this.retryDelay = ms;
 		return this;
-	}
-
-	/** @deprecated Use `setRetryDelay`. */
-	setRetryTimeout(ms: number): this {
-		return this.setRetryDelay(ms);
 	}
 
 	/**
@@ -1413,26 +1403,6 @@ export class Fch extends URL {
 	after(interceptor: (response: Response) => Response | Promise<Response>): this {
 		this.responseInterceptors.push(interceptor);
 		return this;
-	}
-
-	/**
-	 * @deprecated Use {@link Fch.before} instead.
-	 * @param {(request: Fch) => void|Promise<void>} interceptor - Hook function.
-	 * @returns {Fch} Current instance for chaining.
-	 */
-	addRequestInterceptor(interceptor: (request: Fch) => void | Promise<void>): this {
-		return this.before(interceptor);
-	}
-
-	/**
-	 * @deprecated Use {@link Fch.after} instead.
-	 * @param {(response: Response) => Response|Promise<Response>} interceptor - Hook.
-	 * @returns {Fch} Current instance for chaining.
-	 */
-	addResponseInterceptor(
-		interceptor: (response: Response) => Response | Promise<Response>
-	): this {
-		return this.after(interceptor);
 	}
 
 	// ============================================================

@@ -182,8 +182,6 @@ File inputs contribute their filename.
 | `setCORS(mode)` | Sets `mode` |
 | `disableCache()` | Sets `cache: "no-store"` |
 | `setDedupeKey(key)` | String or factory, called at most once per request |
-| `setRetryTimeout(ms)` | *Deprecated*: `setRetryDelay` |
-| `setIdempotencyKey(key)` | *Deprecated*: `setDedupeKey` |
 
 ### `setFetch(impl)` / `fetch`
 
@@ -213,11 +211,30 @@ unless you already set that header.
 | --- | --- |
 | `before(fn)` | Before **every** attempt (including retries) |
 | `after(fn)` | After the final response, before it is returned |
-| `addRequestInterceptor(fn)` | *Deprecated*: `before` |
-| `addResponseInterceptor(fn)` | *Deprecated*: `after` |
 
 Several hooks chain in registration order. An error thrown by `after()` is
 never retried.
+
+## Deprecated aliases
+
+Four methods that only ever delegated to another name are no longer in the core,
+so their bytes cost only the projects that still call them. Attach the compat
+plugin to get them back:
+
+```ts
+import { compat } from "@westtrade/fch/plugins/compat";
+
+const req = new Fch(url).use(compat());
+```
+
+| Deprecated | Use instead |
+| --- | --- |
+| `setRetryTimeout(ms)` | `setRetryDelay(ms)` |
+| `setIdempotencyKey(key)` | `setDedupeKey(key)` |
+| `addRequestInterceptor(fn)` | `before(fn)` |
+| `addResponseInterceptor(fn)` | `after(fn)` |
+
+`DEPRECATED_MEMBERS` is exported for tooling and tests.
 
 ## Logging
 

@@ -29,6 +29,12 @@
 			"import": "./dist/plugins/validate.mjs",
 			"require": "./dist/plugins/validate.js",
 			"default": "./dist/plugins/validate.js"
+		},
+		"./plugins/compat": {
+			"types": "./dist/plugins/compat.d.ts",
+			"import": "./dist/plugins/compat.mjs",
+			"require": "./dist/plugins/compat.js",
+			"default": "./dist/plugins/compat.js"
 		}
 	},
 	"scripts": {

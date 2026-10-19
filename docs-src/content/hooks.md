@@ -161,11 +161,16 @@ Not everything belongs in a hook. A rule of thumb:
 
 ## Deprecated aliases
 
-The original API used longer names. They still work and delegate:
+The original API used longer names. They moved out of the core into the
+[compat plugin](plugins.md), so they cost nothing unless you ask for them:
 
 ```ts
-api.addRequestInterceptor(fn);  // same as before(fn)
-api.addResponseInterceptor(fn); // same as after(fn)
+import { compat } from "@westtrade/fch/plugins/compat";
+
+const req = new Fch(url).use(compat());
+
+req.addRequestInterceptor(fn);  // same as before(fn)
+req.addResponseInterceptor(fn); // same as after(fn)
 ```
 
 Prefer `before()` / `after()` in new code.

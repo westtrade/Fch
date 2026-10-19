@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { resolve } from "node:path";
 import { Fch, create } from "../src/Fch";
+import { compat, DEPRECATED_MEMBERS } from "../src/plugins/compat";
 
 // Guards the documentation site against drift: every page must exist, every
 // internal link must resolve, and the API reference must name real members.
@@ -50,14 +51,24 @@ describe("documentation site", () => {
 
 		const req = new Fch("https://api.example.com/x") as never as Record<string, unknown>;
 		const api = create({ baseUrl: "https://api.example.com" }) as never as Record<string, unknown>;
+		// Members documented as living in a plugin must come from that plugin.
+		const withCompat = new Fch("https://api.example.com/x").use(compat()) as never as Record<
+			string,
+			unknown
+		>;
 
 		// Names documented on the builder must exist on the builder; the rest are
-		// create()-only or constructor-only and are checked against the client.
+		// create()-only, constructor-only, or plugin-provided.
 		const clientOnly = new Set(["get", "head", "post", "put", "patch", "delete", "request"]);
+		const pluginProvided = new Set<string>(DEPRECATED_MEMBERS);
 
 		for (const name of new Set(members)) {
 			if (clientOnly.has(name)) {
 				expect(typeof api[name], `client.${name}`).toBe("function");
+				continue;
+			}
+			if (pluginProvided.has(name)) {
+				expect(typeof withCompat[name], `compat.${name}`).toBe("function");
 				continue;
 			}
 			if (name === "fch" || name === "Fch" || name === "create") continue;

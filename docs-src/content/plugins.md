@@ -118,6 +118,23 @@ There is no client-wide `plugins` option yet: a plugin holds state, and sharing
 one instance's state across many requests needs its own design. Wrap the builder
 as above, or call `use()` explicitly.
 
+## First-party plugins
+
+| Plugin | What it does |
+| --- | --- |
+| [Nano Stores](nanostores.md) | the request becomes a store, any framework |
+| [Validation](validate.md) | reject a body that breaks the contract |
+| [Compat](api.md#deprecated-aliases) | the four deprecated method aliases |
+
+`compat()` is also the smallest real example of the pattern: it takes over names
+the core no longer has, and adds nothing else.
+
+```ts
+import { compat } from "@westtrade/fch/plugins/compat";
+
+new Fch(url).use(compat()).setRetryTimeout(500);
+```
+
 ## Rules
 
 - **Be idempotent by name.** `use()` skips a plugin whose `name` is already
