@@ -317,3 +317,89 @@ describe("UI timers (Superforms-style)", () => {
 		expect(count).toBe(0);
 	});
 });
+
+describe("custom fetch", () => {
+	test("the `fetch` option is used instead of the global", async () => {
+		let used = "";
+		const req = new Fch("https://api.example.com/x", {
+			fetch: async () => {
+				used = "custom";
+				return new Response("{}");
+			},
+		});
+
+		await req.send();
+		expect(used).toBe("custom");
+	});
+
+	test("setFetch() wins over the global, and validates", async () => {
+		const req = new Fch("https://api.example.com/x").setFetch(async () => new Response("{}"));
+		expect(typeof req.fetch).toBe("function");
+		expect(() => new Fch("https://api.example.com/x").setFetch(1 as never)).toThrow(
+			/setFetch\(\) expects a function/,
+		);
+	});
+
+	test("the global fetch is resolved lazily, so a late polyfill works", async () => {
+		const original = globalThis.fetch;
+		const req = new Fch("https://api.example.com/x");
+
+		let called = false;
+		globalThis.fetch = (async () => {
+			called = true;
+			return new Response("{}");
+		}) as unknown as typeof fetch;
+
+		try {
+			await req.send();
+		} finally {
+			globalThis.fetch = original;
+		}
+		expect(called).toBe(true);
+	});
+
+	test("the abort signal reaches the custom fetch", async () => {
+		let hasSignal = false;
+		const req = new Fch("https://api.example.com/x", {
+			timeout: 0,
+			fetch: async (_url, init) => {
+				hasSignal = !!init?.signal;
+				return new Response("{}");
+			},
+		});
+
+		await req.send();
+		expect(hasSignal).toBe(true);
+	});
+
+	test("errors from a custom fetch are retried like network errors", async () => {
+		let attempts = 0;
+		const req = new Fch("https://api.example.com/x", {
+			retries: 2,
+			retryDelay: 1,
+			fetch: async () => {
+				attempts++;
+				throw new TypeError("custom down");
+			},
+		});
+
+		await req.send().catch(() => {});
+		expect(attempts).toBe(3);
+	});
+
+	test("create() forwards the option to shortcuts and request()", async () => {
+		const { create } = await import("../src/Fch");
+		let hits = 0;
+		const api = create({
+			baseUrl: "https://api.example.com",
+			fetch: async () => {
+				hits++;
+				return new Response("{}");
+			},
+		});
+
+		await api.get("/a");
+		await api.request("/b").send();
+		expect(hits).toBe(2);
+	});
+});

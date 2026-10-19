@@ -37,6 +37,7 @@ import mod from './Fch.literal.js'
 
 export const fch = mod.fch
 export const raw = mod.raw
+export const withFetch = mod.withFetch
 
 export default mod.fch
 `,

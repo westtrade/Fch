@@ -91,6 +91,46 @@ clone, so the `Response` you get back is still readable — you can call
 `response.headers.get(...)`, or read it again, without hitting
 "Body already used".
 
+## A custom `fetch`
+
+`Fch` calls the global `fetch`, resolved at request time. To supply your own — a
+tracing wrapper, a proxy, MSW in tests, or a runtime without a global `fetch` —
+pass the `fetch` option:
+
+```tabs
+=== class
+const req = new Fch("https://api.example.com/x", {
+	fetch: (url, init) => fetch(`${proxy}?to=${encodeURIComponent(String(url))}`, init),
+});
+
+await req.json();
+=== function
+const api = fch.create({
+	baseUrl: "https://api.example.com",
+	fetch: (url, init) => fetch(`${proxy}?to=${encodeURIComponent(String(url))}`, init),
+});
+
+await api.get("/x");
+=== literal
+// a literal starts eagerly, so bind the fetch before the tag runs
+await fch.withFetch(myFetch)`https://api.example.com/x`;
+```
+
+It is also settable later with `req.setFetch(fn)`, which is what you want on a
+builder:
+
+```ts
+const req = new Fch("https://api.example.com/x").setFetch(myFetch);
+```
+
+The implementation receives the same `(url, init)` as `fetch`, with `init.signal`
+already combined from the timeout and your abort signal. Everything above it
+still applies: retries, backoff, dedupe, interceptors and the UI timers all run
+around your function, and an error it throws is retried like a network failure.
+
+> **Eager start:** `setFetch()` on a request that already started is too late.
+> Use the option, or `fch.withFetch(fn)` for the tagged template.
+
 ## The mental model
 
 There are only three things to remember.

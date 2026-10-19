@@ -200,3 +200,39 @@ describe("fch method tags", () => {
 		expect(() => fch.get`/users`).toThrow(/requires an absolute URL/);
 	});
 });
+
+describe("withFetch", () => {
+	test("binds a custom fetch to the bare tag", async () => {
+		let used = "";
+		await fch.withFetch(async () => {
+			used = "custom";
+			return new Response("{}", { headers: { "Content-Type": "application/json" } });
+		})`https://api.example.com/x`;
+
+		expect(used).toBe("custom");
+	});
+
+	test("binds it to the method tags too", async () => {
+		let used = "";
+		const mine = async () => {
+			used = "custom";
+			return new Response("{}");
+		};
+
+		await fch.withFetch(mine).get`https://api.example.com/x`;
+		expect(used).toBe("custom");
+
+		used = "";
+		await fch.withFetch(mine).post({ n: 1 })`https://api.example.com/x`;
+		expect(used).toBe("custom");
+	});
+
+	test("the default tag keeps using the global fetch", async () => {
+		await fch`https://api.example.com/x`;
+		expect(calls).toHaveLength(1);
+	});
+
+	test("rejects a non-function", () => {
+		expect(() => fch.withFetch("nope" as never)).toThrow(/withFetch\(\) expects a function/);
+	});
+});

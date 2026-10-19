@@ -112,6 +112,15 @@ export interface PluginApi {
 export interface FetchRequestOptions extends RequestInit {
 	retries?: number;
 	/**
+	 * Custom `fetch` implementation. Defaults to the global `fetch` at call time,
+	 * so a polyfill installed later is picked up. Pass your own to add tracing,
+	 * a proxy, MSW in tests, or a runtime where `fetch` is not global.
+	 *
+	 * The function receives the URL and a `RequestInit` with `signal` already
+	 * combined (timeout + your abort signal), and must resolve to a `Response`.
+	 */
+	fetch?: typeof globalThis.fetch;
+	/**
 	 * UI delay before the request is reported as "delayed", in ms (default 500).
 	 * Purely observational: it never aborts or delays the request. Set `0` to
 	 * report `delayed` immediately. Pass `false` to disable the timer.
@@ -398,6 +407,13 @@ export class Fch extends URL {
 	 */
 	private requestTimedOut = false;
 
+	/**
+	 * Custom `fetch` implementation, or `null` to use the global one.
+	 * Resolved at call time, not at construction, so a polyfill loaded after
+	 * `new Fch()` still applies.
+	 */
+	private fetchImpl: typeof globalThis.fetch | null = null;
+
 	/** UI timers (see `delayMs` / `timeoutMs`). Observational only. */
 	private delayMs: number | false = 500;
 	private timeoutMs: number | false = 8000;
@@ -483,6 +499,7 @@ export class Fch extends URL {
 			headers,
 			delayMs = 500,
 			timeoutMs = 8000,
+			fetch: fetchOption,
 			...options
 		}: FetchRequestOptions = {}
 	) {
@@ -522,6 +539,7 @@ export class Fch extends URL {
 		// UI timers: observational only, so they are validated separately from
 		// `timeout` (which aborts the request).
 		this.setTimers(delayMs, timeoutMs);
+		if (fetchOption) this.setFetch(fetchOption);
 	}
 
 	/**
@@ -1183,6 +1201,46 @@ export class Fch extends URL {
 	}
 
 	/**
+	 * Use a custom `fetch` implementation. Chainable, and also settable through
+	 * the `fetch` option.
+	 *
+	 * ```ts
+	 * // tracing
+	 * req.setFetch((url, init) => {
+	 *   console.log(init.method, url);
+	 *   return fetch(url, init);
+	 * });
+	 *
+	 * // a proxy for one host
+	 * req.setFetch((url, init) => fetch(proxy(url), init));
+	 * ```
+	 *
+	 * @param impl - A `fetch`-compatible function. Must return a `Response`.
+	 */
+	setFetch(impl: typeof globalThis.fetch): this {
+		if (typeof impl !== 'function') {
+			throw new TypeError(`setFetch() expects a function, got ${typeof impl}`);
+		}
+		this.fetchImpl = impl;
+		return this;
+	}
+
+	/** The `fetch` this instance will use: the custom one, else the global. */
+	get fetch(): typeof globalThis.fetch {
+		const custom = this.fetchImpl;
+		if (custom) return custom;
+
+		// Resolved lazily so a polyfill installed after construction is used.
+		const globalFetch = (globalThis as { fetch?: typeof globalThis.fetch }).fetch;
+		if (typeof globalFetch !== 'function') {
+			throw new TypeError(
+				'No global `fetch` available. Pass one with `{ fetch }` or `setFetch()`.',
+			);
+		}
+		return globalFetch;
+	}
+
+	/**
 	 * Configure the UI timers. They never abort a request: `timeout` is the
 	 * option that does. A `delayMs` greater than `timeoutMs` is rejected, because
 	 * the phases would be unreachable in order.
@@ -1520,7 +1578,7 @@ export class Fch extends URL {
 				let interceptorError = false;
 
 				try {
-					const response = await fetch(snapshot.url, {
+					const response = await this.fetch(snapshot.url, {
 						...snapshot.fetchOptions,
 						method: snapshot.method,
 						headers: snapshot.headers,

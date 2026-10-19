@@ -55,6 +55,7 @@ api.defaults;                   // the shared defaults
 | `logger` | `Logger` | `console` | Where log lines go |
 | `debug` | `boolean` | `false` | Enable `info`/`debug` logging |
 | `headers` | `HeadersInit` | — | Initial headers |
+| `fetch` | `typeof fetch` | global | Custom fetch implementation |
 | `method` | `string` | `GET` | Validated and upper-cased |
 | `retryTimeout` | `number` | — | *Deprecated*: use `retryDelay` |
 | `abortController` | `AbortController` | — | *Deprecated*: use `signal` |
@@ -176,6 +177,13 @@ File inputs contribute their filename.
 | `setDedupeKey(key)` | String or factory, called at most once per request |
 | `setRetryTimeout(ms)` | *Deprecated*: `setRetryDelay` |
 | `setIdempotencyKey(key)` | *Deprecated*: `setDedupeKey` |
+
+### `setFetch(impl)` / `fetch`
+
+Use a custom `fetch`-compatible function for this instance. The getter returns
+the custom one, else the global `fetch` (resolved lazily, so a polyfill loaded
+after construction still applies). Throws `TypeError` for a non-function, and a
+`TypeError` mentioning `{ fetch }` when no global exists.
 
 ### `method`
 

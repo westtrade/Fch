@@ -126,6 +126,32 @@ const [created] = await fch.post<House>({ name: "Cottage" })`https://api.example
 The tag returns the same `FchCall`, so `await`, `.json()`, `.send()`,
 `.request` and `abort()` all work exactly as with the bare tag.
 
+## A custom `fetch`
+
+A literal starts its request the moment the tag runs, so `setFetch()` on
+`.request` afterwards is too late. Bind the implementation first:
+
+```ts
+import fch from "@westtrade/fch/literal";
+
+await fch.withFetch(myFetch)`https://api.example.com/users/1`;
+await fch.withFetch(myFetch).get`https://api.example.com/users/1`;
+await fch.withFetch(myFetch).post({ name: "Ann" })`https://api.example.com/users`;
+```
+
+A named export exists too, for when you want it once:
+
+```ts
+import { withFetch } from "@westtrade/fch/literal";
+
+const traced = withFetch((url, init) => {
+	console.log(init?.method, url);
+	return fetch(url, init);
+});
+
+await traced`https://api.example.com/users/1`;
+```
+
 ## Interpolation is encoded
 
 This is the reason to use the tag instead of a plain string. Every interpolated

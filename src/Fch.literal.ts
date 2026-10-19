@@ -75,42 +75,82 @@ function request(
 	method: string,
 	body: FchBodyInput | undefined,
 	strings: TemplateStringsArray,
-	values: unknown[]
+	values: unknown[],
+	fetchImpl?: typeof globalThis.fetch
 ): FchCall<unknown> {
-	const instance = new Fch(buildUrl(strings, values)).setMethod(method);
+	const instance = new Fch(buildUrl(strings, values), fetchImpl ? { fetch: fetchImpl } : {})
+		.setMethod(method);
 	if (body !== undefined && body !== null) applyShortcutBody(instance, body);
 	return toCall(instance);
 }
 
-/** Bodyless methods: `fch.get\`…\``, `fch.del\`…\``. */
-const tag =
-	(method: string): UrlTag =>
-	<T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): FchCall<T> =>
-		request(method, undefined, strings, values) as FchCall<T>;
+/**
+ * Build the per-method tags for one `fetch` implementation. Shared by the
+ * default tag and {@link WithFetch}, so both spellings behave identically.
+ */
+function tagsFor(fetchImpl?: typeof globalThis.fetch) {
+	const plain = (method: string): UrlTag =>
+		<T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): FchCall<T> =>
+			request(method, undefined, strings, values, fetchImpl) as FchCall<T>;
 
-/** Methods that carry a body: `fch.post(body)\`…\``. */
-const bodyTag =
-	(method: string) =>
-	(body: FchBodyInput) =>
-	<T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): FchCall<T> =>
-		request(method, body, strings, values) as FchCall<T>;
+	const withBody = (method: string) => (body: FchBodyInput): UrlTag =>
+		<T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): FchCall<T> =>
+			request(method, body, strings, values, fetchImpl) as FchCall<T>;
+
+	return {
+		get: plain('GET'),
+		head: plain('HEAD'),
+		options: plain('OPTIONS'),
+		delete: plain('DELETE'),
+		del: plain('DELETE'),
+		post: withBody('POST'),
+		put: withBody('PUT'),
+		patch: withBody('PATCH'),
+	};
+}
 
 /**
- * The body-carrying form. It is a plain function returning a {@link UrlTag},
- * so the generic goes on the *template*:
- *
- * ```ts
- * fch.post(user)`https://…`          // inferred as unknown
- * fch.post(user)<User>`https://…`     // no: use the tag's generic instead
- * const tag = fch.post<User>(user);   // and here it is on the body call
- * ```
+ * The body-carrying form: `fch.post(body)\`…\``. The generic goes on the body
+ * call, so `fch.post<User>(body)` types the whole chain.
  */
 export type BodyTag = <T = unknown>(body: FchBodyInput) => UrlTag & {
 	(strings: TemplateStringsArray, ...values: unknown[]): FchCall<T>;
 };
 
 /**
- * The tagged template. Also carries `raw`, `Fch`, and one tag per HTTP method.
+ * A tag bound to a custom `fetch`. A literal starts eagerly, so the
+ * implementation must be known before the tag is applied — `setFetch()` on the
+ * already-started request is too late.
+ *
+ * ```ts
+ * fch.withFetch(myFetch)`https://api.example.com/x`;
+ * ```
+ */
+export interface WithFetch {
+	<T = unknown>(
+		strings: TemplateStringsArray,
+		...values: unknown[]
+	): FchCall<T>;
+	/** Methods, for parity with the main tag. */
+	get: UrlTag;
+	delete: UrlTag;
+	del: UrlTag;
+	head: UrlTag;
+	options: UrlTag;
+	post: (body: FchBodyInput) => UrlTag;
+	put: (body: FchBodyInput) => UrlTag;
+	patch: (body: FchBodyInput) => UrlTag;
+}
+
+/** Bodyless methods: `fch.get\`…\``, `fch.del\`…\``. */
+const tag = (method: string): UrlTag => tagsFor()[method as 'get'] as UrlTag;
+
+/** Methods that carry a body: `fch.post(body)\`…\``. */
+const bodyTag = (method: string) => tagsFor()[method as 'post'] as (body: FchBodyInput) => UrlTag;
+
+/**
+ * The tagged template. Also carries `raw`, `Fch`, one tag per HTTP method, and
+ * `withFetch()` for a custom `fetch`.
  *
  * Bodyless methods are used directly, body-carrying methods are curried with
  * the body first — the template itself only carries the URL:
@@ -119,7 +159,7 @@ export type BodyTag = <T = unknown>(body: FchBodyInput) => UrlTag & {
  * fch.get`https://api.example.com/users/1`;
  * fch.delete`https://api.example.com/users/1`;
  * fch.post({ name: "Ann" })`https://api.example.com/users`;
- * fch.put(form)`https://api.example.com/users/1`;
+ * fch.withFetch(myFetch)`https://api.example.com/users/1`;
  * ```
  */
 export interface FchLiteral {
@@ -136,6 +176,11 @@ export interface FchLiteral {
 	raw: typeof raw;
 	/** The underlying class, for `instanceof` checks or a plain builder. */
 	Fch: typeof Fch;
+	/**
+	 * Bind a custom `fetch`. A literal starts eagerly, so the implementation must
+	 * be supplied before the tag runs.
+	 */
+	withFetch(fetchImpl: typeof globalThis.fetch): WithFetch;
 
 	/** `GET https://…` */
 	get: UrlTag;
@@ -143,7 +188,7 @@ export interface FchLiteral {
 	head: UrlTag;
 	/** `OPTIONS https://…` */
 	options: UrlTag;
-	/** `DELETE https://…`. `del` is an alias, for symmetry with `delete` being reserved-ish. */
+	/** `DELETE https://…`. `del` is an alias. */
 	delete: UrlTag;
 	/** Alias of `delete`. */
 	del: UrlTag;
@@ -160,20 +205,29 @@ function literal<T = unknown>(
 	strings: TemplateStringsArray,
 	...values: unknown[]
 ): FchCall<T> {
-	return toCall<T>(new Fch(buildUrl(strings, values)));
+	return request('GET', undefined, strings, values) as FchCall<T>;
 }
+
+const defaultTags = tagsFor();
 
 export const fch: FchLiteral = Object.assign(literal, {
 	raw,
 	Fch,
-	get: tag('GET'),
-	head: tag('HEAD'),
-	options: tag('OPTIONS'),
-	delete: tag('DELETE'),
-	del: tag('DELETE'),
-	post: bodyTag('POST'),
-	put: bodyTag('PUT'),
-	patch: bodyTag('PATCH'),
+	withFetch,
+	...defaultTags,
 });
+
+/** Bind a custom `fetch` to the tag and its method helpers. */
+export function withFetch(fetchImpl: typeof globalThis.fetch): WithFetch {
+	if (typeof fetchImpl !== 'function') {
+		throw new TypeError(`withFetch() expects a function, got ${typeof fetchImpl}`);
+	}
+
+	const tags = tagsFor(fetchImpl);
+	const run = <T = unknown>(strings: TemplateStringsArray, ...values: unknown[]): FchCall<T> =>
+		request('GET', undefined, strings, values, fetchImpl) as FchCall<T>;
+
+	return Object.assign(run, tags);
+}
 
 export default fch;
