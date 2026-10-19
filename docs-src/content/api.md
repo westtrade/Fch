@@ -293,6 +293,11 @@ An async generator that repeats the request. A failed poll **yields** the error
 instead of throwing, so the loop continues. `delay` defaults to `300` ms and is
 used exactly — it is not clamped by `maxRetryDelay`.
 
+Without a `controller`, the poll owns a fresh stop signal; `abort()` still stops
+a running poll, but a poll started after an `abort()` works normally. Pass your
+own controller when the poll's lifetime differs from the request's. See
+[Polling](polling.md).
+
 ```ts
 for await (const result of api.request("/jobs/1").poll(1000, controller)) {
 	if (result instanceof Error) continue;

@@ -1997,8 +1997,31 @@ export class Fch extends URL {
 	 *   console.log(response);
 	 * }
 	 */
-	async *poll(delay = 300, abortController: AbortController = this.controller): AsyncGenerator<Response | Error> {
-		while (!abortController.signal.aborted && !this.masterController.signal.aborted) {
+	async *poll(
+		delay = 300,
+		abortController?: AbortController,
+	): AsyncGenerator<Response | Error> {
+		// A poll owns its stop signal. Defaulting to `this.controller` was wrong:
+		// that controller is aborted permanently by `abort()`, so a poll started
+		// afterwards produced an empty generator with no explanation — while the
+		// builder itself stayed usable.
+		const controller = abortController ?? new AbortController();
+
+		let stopped = false;
+		let watched: AbortController | null = null;
+
+		// `abort()` must still stop a running poll. The listener is attached to
+		// the current abort generation, which `executeRequest` replaces after an
+		// abort, so it is re-checked each iteration.
+		const watchMaster = (): void => {
+			if (watched === this.masterController) return;
+			watched = this.masterController;
+			watched.signal.addEventListener('abort', () => { stopped = true; }, { once: true });
+		};
+
+		while (!controller.signal.aborted && !stopped) {
+			watchMaster();
+
 			try {
 				// A full execution per iteration, so plugin hooks, the UI timers
 				// and the store see every poll — but without `makeRequest`'s eager
@@ -2011,7 +2034,8 @@ export class Fch extends URL {
 				yield error as Error;
 			}
 
-			if (abortController.signal.aborted || this.masterController.signal.aborted) break;
+			if (controller.signal.aborted || stopped) break;
+			watchMaster();
 
 			// The poll interval is the caller's, not a retry backoff: `sleep()`
 			// keeps it exact instead of clamping it to `maxRetryDelay`.
@@ -2024,6 +2048,7 @@ export class Fch extends URL {
 			}
 		}
 	}
+
 
 	/**
 	 * Begin the request immediately instead of on first `await`/`.then()`.

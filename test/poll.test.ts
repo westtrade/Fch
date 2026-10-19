@@ -168,3 +168,80 @@ describe("poll", () => {
 		expect(iterations).toHaveLength(0);
 	});
 });
+
+describe("poll and abort()", () => {
+	test("the poll owns its stop signal, so it survives an earlier abort()", async () => {
+		// Defaulting to `this.controller` was wrong: abort() kills that controller
+		// permanently, so a poll started afterwards was an empty generator with
+		// no explanation.
+		globalThis.fetch = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+
+		const req = new Fch("https://api.example.com/x", { delayMs: false, timeoutMs: false });
+		req.abort();
+
+		const results = await take(req, 2);
+
+		expect(results).toHaveLength(2);
+	});
+
+	test("an explicit controller works after an abort() too", async () => {
+		globalThis.fetch = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+
+		const req = new Fch("https://api.example.com/x", { delayMs: false, timeoutMs: false });
+		req.abort();
+
+		const controller = new AbortController();
+		const seen: unknown[] = [];
+		for await (const result of req.poll(5, controller)) {
+			seen.push(result);
+			if (seen.length >= 2) controller.abort();
+		}
+
+		expect(seen).toHaveLength(2);
+	});
+
+	test("abort() still stops a poll that is already running", async () => {
+		globalThis.fetch = (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch;
+
+		const req = new Fch("https://api.example.com/x", { delayMs: false, timeoutMs: false });
+		const controller = new AbortController();
+		let iterations = 0;
+
+		const iterator = req.poll(5, controller);
+		await iterator.next();
+
+		// Abort from outside, then drain: the generator must end.
+		req.abort();
+
+		for await (const _result of { [Symbol.asyncIterator]: () => iterator }) {
+			iterations++;
+			if (iterations > 5) break;
+		}
+
+		expect(iterations).toBeLessThanOrEqual(1);
+	});
+
+	test("the poll does not reuse the abort generation of a request", async () => {
+		// Two polls on one instance must not share a stop signal.
+		let calls = 0;
+		globalThis.fetch = (async () => {
+			calls++;
+			return new Response("{}", { status: 200 });
+		}) as unknown as typeof fetch;
+
+		const req = new Fch("https://api.example.com/x", { delayMs: false, timeoutMs: false });
+
+		const first = new AbortController();
+		const second = new AbortController();
+
+		const a = req.poll(5, first);
+		const b = req.poll(5, second);
+
+		await a.next();
+		await b.next();
+		first.abort();
+		await b.next();
+
+		expect(calls).toBeGreaterThanOrEqual(3);
+	});
+});

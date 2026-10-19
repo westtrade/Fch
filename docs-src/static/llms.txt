@@ -71,7 +71,8 @@ const shared = new Fch(url, { dedupe: true });
 await Promise.all([shared.json(), shared.json()]);  // 1 request on the wire
 
 // polling: an async generator; every iteration is a NEW request, and a failure
-// is yielded (not thrown) so the loop survives it
+// is yielded (not thrown) so the loop survives it. It owns its stop signal, so
+// it survives an earlier abort(); req.abort() still stops a running poll.
 for await (const res of new Fch(url).poll(1000, controller)) {
   if (res instanceof Error) continue;
   if ((await res.json()).done) break;
