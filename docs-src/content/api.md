@@ -242,6 +242,22 @@ for await (const result of api.request("/jobs/1").poll(1000, controller)) {
 }
 ```
 
+## Tagged template entry point
+
+`@westtrade/fch/literal` exports a template tag. Same class, same options, only
+the spelling differs; the returned call is a `FchCall`, so it is both awaitable
+and a request builder.
+
+```ts
+import fch, { raw } from "@westtrade/fch/literal";
+
+await fch`https://api.example.com/users/1`;          // [body, Response]
+fch`https://api.example.com/users/1`.request;         // the Fch instance
+fch`https://api.example.com/users/${raw("1/posts")}`; // skip encoding
+```
+
+Interpolated values are URL-encoded. See [Tagged template](literal.md).
+
 ## Types
 
 ```ts

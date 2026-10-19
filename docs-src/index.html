@@ -474,6 +474,10 @@ req <span class="text-fuchsia-400">instanceof</span> URL  <span class="text-slat
 
 <span class="text-fuchsia-400">const</span> [houses] = <span class="text-fuchsia-400">await</span> api.<span class="text-sky-300">get</span>&lt;<span class="text-teal-300">House</span>[]&gt;(<span class="text-amber-300">"/houses"</span>);
 api.<span class="text-sky-300">post</span>(<span class="text-amber-300">"/houses"</span>, { name: <span class="text-amber-300">"Cottage"</span> }); <span class="text-slate-500">// JSON</span>
+
+<span class="text-slate-500">// or put the URL in backticks</span>
+<span class="text-fuchsia-400">import</span> lit <span class="text-fuchsia-400">from</span> <span class="text-amber-300">"@westtrade/fch/literal"</span>;
+<span class="text-fuchsia-400">const</span> [one] = <span class="text-fuchsia-400">await</span> lit<span class="text-amber-300">`https://api.example.com/houses/1`</span>;
 </code></pre>
 			</div>
 		</div>

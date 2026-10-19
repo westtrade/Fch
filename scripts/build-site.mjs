@@ -47,6 +47,7 @@ const NAV = [
 		items: [
 			{ slug: 'forms', title: 'Forms & events', blurb: 'Pass the <form> or the submit event.' },
 			{ slug: 'shortcuts', title: 'Shorthand API', blurb: 'api.get / post / put — fire and forget.' },
+			{ slug: 'literal', title: 'Tagged template', blurb: 'fch`https://…` — a URL in backticks.' },
 		],
 	},
 	{

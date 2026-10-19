@@ -1787,7 +1787,8 @@ async function parseBody<T>(response: Response): Promise<T> {
 }
 
 /** Attach the tuple/promise helpers to an eagerly started instance. */
-function toCall<T>(instance: Fch): FchCall<T> {
+/** Shared with the tagged-template entry point in `Fch.literal.ts`. */
+export function toCall<T>(instance: Fch): FchCall<T> {
 	// Start once, now: `start()` memoises the in-flight request, so every helper
 	// below (and `abort()`) observes that single request instead of firing another.
 	instance.start();

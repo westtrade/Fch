@@ -4,8 +4,23 @@
 	"description": "URL and fetch combined: a request builder that IS a URL — with retries, timeouts, dedupe and typed body helpers.",
 	"main": "dist/Fch.js",
 	"types": "dist/Fch.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/Fch.d.ts",
+			"import": "./dist/Fch.mjs",
+			"require": "./dist/Fch.js",
+			"default": "./dist/Fch.js"
+		},
+		"./literal": {
+			"types": "./dist/Fch.literal.d.ts",
+			"import": "./dist/Fch.literal.mjs",
+			"require": "./dist/Fch.literal.js",
+			"default": "./dist/Fch.literal.js"
+		},
+		"./package.json": "./package.json"
+	},
 	"scripts": {
-		"build": "tsc",
+		"build": "tsc && node scripts/build-esm.mjs",
 		"test": "vitest run",
 		"size": "size-limit",
 		"site": "npm run build && node scripts/build-demo-bundle.mjs && node scripts/build-site.mjs && node scripts/build-site-css.mjs",
