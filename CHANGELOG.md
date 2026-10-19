@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/westtrade/Fch/compare/v1.12.0...v1.13.0) (2026-10-19)
+
+
+### Features
+
+* **validate:** default to the formData target ([a164187](https://github.com/westtrade/Fch/commit/a164187f272c379f2fc7976eace669d9e43d8381))
+
 # [1.12.0](https://github.com/westtrade/Fch/compare/v1.11.0...v1.12.0) (2026-10-19)
 
 
