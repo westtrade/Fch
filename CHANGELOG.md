@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/westtrade/Fch/compare/v1.3.1...v1.4.0) (2026-10-19)
+
+
+### Features
+
+* **site:** add a Star call-to-action to the header ([f655dac](https://github.com/westtrade/Fch/commit/f655dac8f0d74d6229aeacde6cb075d80683d837))
+
 ## [1.3.1](https://github.com/westtrade/Fch/compare/v1.3.0...v1.3.1) (2026-10-19)
 
 
