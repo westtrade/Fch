@@ -145,7 +145,7 @@ function renderTabs(text) {
 		.join('\n')
 
 	return `<div class="my-5" x-data="{ tab: '${sections[0].key}', copied: false }">
-<div class="flex gap-1 rounded-t-xl border border-b-0 border-slate-700 bg-indigo-950 px-2 pt-1" role="tablist">${buttons}</div>
+<div class="flex cursor-pointer gap-1 rounded-t-xl border border-b-0 border-indigo-900 bg-indigo-950 px-2 pt-1" role="tablist">${buttons}</div>
 ${panels}
 </div>`
 }
