@@ -159,4 +159,3 @@ Extending and operating:
 ## Optional
 
 - [Full documentation in one file](https://westtrade.github.io/Fch/llms-full.txt): every page concatenated, for large context windows
-- [Roadmap](https://github.com/westtrade/Fch/blob/main/ROADMAP.md): positioning and measurements

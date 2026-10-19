@@ -372,6 +372,27 @@ describe("llms.txt", () => {
 		expect(text).toMatch(/unscoped `fch` on npm is a different library|never suggest it/i);
 	});
 
+	test("does not publish the token-economy metric yet", () => {
+		// The measurement is not ready to be public: it must be recorded in
+		// ROADMAP.md only. Guarding it here stops it leaking into the site, the
+		// cheat sheet or the comparison pages by accident.
+		const published = [
+			{ name: "llms.txt", body: readFileSync(llmsPath, "utf8") },
+			{ name: "index.html", body: readFileSync(resolve(root, "docs-src/index.html"), "utf8") },
+			...pages.map((page) => ({ name: page.slug, body: page.body })),
+		];
+
+		for (const { name, body } of published) {
+			// A token count next to a library name is what a claim looks like.
+			expect(body, `${name} mentions token counts`).not.toMatch(
+				/\b\d+\s+tokens?\b(?![^\n]*auth)/i,
+			);
+			expect(body, `${name} links the roadmap measurements`).not.toContain(
+				"ROADMAP.md",
+			);
+		}
+	});
+
 	test("documents the traps that agents get wrong", () => {
 		const text = readFileSync(llmsPath, "utf8");
 

@@ -7,6 +7,10 @@
 // Token counts are "code the developer writes", not instruction tokens. Where a
 // library has no built-in feature, the helper the caller must write is counted —
 // a comment placeholder would flatter Fch for free.
+//
+// INTERNAL ONLY. These numbers are recorded in ROADMAP.md and are deliberately
+// not published on the site or in llms.txt: the suite is still small. Publishing
+// is a separate decision, guarded by test/docs.test.ts.
 import { encode } from 'gpt-tokenizer'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'

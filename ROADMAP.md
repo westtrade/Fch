@@ -14,6 +14,15 @@ measurement taken at v1.2.5, so progress is checkable rather than aspirational.
 The hypothesis: shorter code means fewer output tokens, and a compact
 instruction set means fewer input tokens.
 
+> **Status: internal only.** This measurement is recorded here and must not be
+> published — not on the site, not in `llms.txt`, not in the comparison pages.
+> It is not yet in a state worth quoting: the task list is small, the tokenizer
+> is one of several (cl100k), and several rows still need a fairer alternative
+> implementation. Revisit once the suite is broader and reviewed.
+>
+> `test/docs.test.ts` fails if a token count or a ROADMAP link reaches the
+> published pages.
+
 ### Measured with a real tokenizer
 
 Characters are a proxy; tokens are what you pay for. Measured with a BPE
