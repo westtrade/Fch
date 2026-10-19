@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+/* Alpine's x-cloak: hide elements until Alpine has initialised them, so the
+   mobile menu does not flash open on load (and stays closed without JS). */
+@layer base {
+	[x-cloak] {
+		display: none !important;
+	}
+}
+
+/* Prose typography for the documentation body. Utilities only — no hand-written CSS. */
+@layer components {
+	.prose-doc h2 {
+		@apply mt-12 mb-3 scroll-mt-24 text-2xl font-semibold tracking-tight text-slate-900;
+	}
+	.prose-doc h3 {
+		@apply mt-8 mb-2 scroll-mt-24 text-lg font-semibold text-slate-900;
+	}
+	.prose-doc p {
+		@apply my-4 text-[15px] leading-7 text-slate-700;
+	}
+	.prose-doc ul {
+		@apply my-4 list-disc space-y-2 pl-6 text-[15px] leading-7 text-slate-700;
+	}
+	.prose-doc ol {
+		@apply my-4 list-decimal space-y-2 pl-6 text-[15px] leading-7 text-slate-700;
+	}
+	.prose-doc li > ul,
+	.prose-doc li > ol {
+		@apply my-2;
+	}
+	.prose-doc a {
+		@apply font-medium text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800;
+	}
+	.prose-doc strong {
+		@apply font-semibold text-slate-900;
+	}
+	.prose-doc code {
+		/* Long inline code (URLs, signatures) must wrap instead of pushing the page wide. */
+		@apply rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.85em] break-words text-slate-800;
+	}
+	.prose-doc :not(pre) > code {
+		@apply whitespace-normal;
+	}
+	.prose-doc pre {
+		@apply overflow-x-auto rounded-xl bg-slate-900 p-4 text-[13px] leading-6 text-slate-100;
+	}
+	.prose-doc pre code {
+		@apply bg-transparent p-0 text-[13px] text-slate-100;
+	}
+	.prose-doc blockquote {
+		@apply my-6 rounded-r-lg border-l-4 border-indigo-400 bg-indigo-50/60 px-4 py-1 text-[15px] text-slate-700;
+	}
+	.prose-doc hr {
+		@apply my-10 border-slate-200;
+	}
+	.prose-doc table {
+		@apply my-6 block w-full overflow-x-auto border-collapse text-left text-sm;
+	}
+	.prose-doc th {
+		@apply whitespace-nowrap border-b border-slate-300 px-3 py-2 font-semibold text-slate-900;
+	}
+	.prose-doc td {
+		@apply border-b border-slate-200 px-3 py-2 align-top text-slate-700;
+	}
+	.prose-doc tbody tr:hover {
+		@apply bg-slate-50;
+	}
+}

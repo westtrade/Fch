@@ -1,0 +1,577 @@
+<!doctype html>
+<!--
+	SOURCE TEMPLATE — do not open this file directly in a browser.
+	It has no compiled tailwind.css and no bundled fch.min.js next to it, so it
+	renders unstyled with dead scripts by design.
+
+	Build the site, then open the result:
+	    npm run site
+	    open site/index.html        (works over file://)
+	    npm run site:serve          (or serve it: http://localhost:8765)
+-->
+<html lang="en" class="scroll-smooth">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fch — the URL is the request</title>
+<meta name="description" content="Fch extends the native URL class: one object that is both a fully mutable URL and the request that targets it. Retries, timeouts, dedupe and typed body helpers in ~5.5 kB.">
+<meta property="og:title" content="Fch — the URL is the request">
+<meta property="og:description" content="One object that is both a real URL and the request. Retries, timeouts, dedupe and typed body helpers in ~5.5 kB.">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/tailwind.css">
+<link rel="stylesheet" href="assets/hljs.css">
+<script src="assets/fch.min.js" defer></script>
+<script src="assets/alpine.min.js" defer></script>
+</head>
+<body class="bg-white text-slate-900 antialiased" x-data="{ nav: false }" x-on:keydown.escape="nav = false">
+
+<!-- ============================================================ header -->
+<header class="sticky top-0 z-40 border-b border-slate-200/80 bg-white/85 backdrop-blur">
+	<div class="mx-auto flex h-16 max-w-6xl items-center gap-3 px-4 sm:px-6 lg:px-8">
+		<a href="index.html" class="flex items-center gap-2.5">
+			<span class="grid h-8 w-8 place-items-center rounded-lg bg-slate-900 font-mono text-sm font-bold text-white">F</span>
+			<span class="text-[15px] font-semibold tracking-tight">Fch</span>
+		</a>
+		<nav class="ml-6 hidden items-center gap-1 md:flex" aria-label="Main">
+			<a href="docs/getting-started.html" class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900">Docs</a>
+			<a href="docs/vs-fetch.html" class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900">vs fetch</a>
+			<a href="docs/vs-libraries.html" class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900">vs libraries</a>
+			<a href="docs/api.html" class="rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900">API</a>
+		</nav>
+		<div class="ml-auto flex items-center gap-1">
+			<a href="https://github.com/westtrade/Fch" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900" aria-label="GitHub">
+				<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 00-.9-2.6c3-.3 6.2-1.5 6.2-6.8A5.3 5.3 0 0019.9 5 4.9 4.9 0 0019.8.6S18.6.2 16 1.9a13.4 13.4 0 00-7 0C6.4.2 5.2.6 5.2.6A4.9 4.9 0 005.1 5a5.3 5.3 0 00-1.4 3.7c0 5.3 3.2 6.5 6.2 6.8a3.4 3.4 0 00-.9 2.6V22"/></svg>
+			</a>
+			<button type="button" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 md:hidden" x-on:click="nav = !nav" :aria-expanded="nav" aria-controls="mobile-nav" aria-label="Menu">
+				<svg x-show="!nav" class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+				<svg x-show="nav" x-cloak class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+			</button>
+		</div>
+	</div>
+	<div id="mobile-nav" x-show="nav" x-cloak x-transition.opacity class="border-t border-slate-200 bg-white md:hidden">
+		<div class="space-y-1 px-4 py-4">
+			<a href="docs/getting-started.html" class="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">Docs</a>
+			<a href="docs/vs-fetch.html" class="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">Why not plain fetch?</a>
+			<a href="docs/vs-libraries.html" class="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">How Fch compares</a>
+			<a href="docs/api.html" class="block rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">API reference</a>
+		</div>
+	</div>
+</header>
+
+<main>
+
+<!-- ============================================================ hero -->
+<section class="relative overflow-hidden border-b border-slate-200">
+	<div class="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(60rem_30rem_at_70%_-10%,#eef2ff,transparent)]"></div>
+	<div class="mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 sm:px-6 lg:grid-cols-2 lg:gap-8 lg:py-24 lg:px-8">
+
+		<div>
+			<p class="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+				<span class="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
+				No dependencies · ~5.5 kB gzipped · MIT
+			</p>
+
+			<h1 class="mt-5 text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl lg:text-[3.4rem] lg:leading-[1.05]">
+				The URL <span class="text-indigo-600">is</span> the request.
+			</h1>
+
+			<p class="mt-5 max-w-xl text-lg leading-relaxed text-slate-600">
+				<code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.9em] text-slate-800">Fch</code>
+				extends the native <code class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[0.9em] text-slate-800">URL</code> class.
+				One object is both a fully mutable URL and the request that targets it —
+				with retries, timeouts, deduplication and typed body helpers on top.
+			</p>
+
+			<p class="mt-3 max-w-xl text-[15px] leading-relaxed text-slate-500">
+				No wrapper around <code class="font-mono text-slate-700">fetch</code> to keep in sync with a URL string.
+				No config object to rebuild. Change <code class="font-mono text-slate-700">pathname</code>, add a
+				<code class="font-mono text-slate-700">searchParam</code>, then await it.
+			</p>
+
+			<div class="mt-8 flex flex-wrap items-center gap-3">
+				<a href="docs/getting-started.html" class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-slate-700">
+					Start in 2 minutes
+					<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+				</a>
+				<a href="docs/vs-fetch.html" class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50">
+					Why not plain fetch?
+				</a>
+			</div>
+
+			<div class="mt-7 flex items-center gap-2 overflow-x-auto rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 font-mono text-[13px] text-slate-700">
+				<span class="select-none text-slate-400">$</span>
+				<span>npm install github:westtrade/Fch</span>
+			</div>
+		</div>
+
+		<!-- code sample -->
+		<div class="relative">
+			<div class="absolute -inset-4 -z-10 rounded-3xl bg-gradient-to-tr from-indigo-100 via-transparent to-transparent blur-2xl"></div>
+			<div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-2xl">
+				<div class="flex items-center gap-2 border-b border-slate-800 px-4 py-3">
+					<span class="h-2.5 w-2.5 rounded-full bg-slate-700"></span>
+					<span class="h-2.5 w-2.5 rounded-full bg-slate-700"></span>
+					<span class="h-2.5 w-2.5 rounded-full bg-slate-700"></span>
+					<span class="ml-2 font-mono text-[11px] text-slate-500">search.ts</span>
+				</div>
+<pre class="overflow-x-auto p-5 font-mono text-[12.5px] leading-6 text-slate-300"><code><span class="text-slate-500">// It IS a URL — the standard API works</span>
+<span class="text-fuchsia-400">const</span> req = <span class="text-fuchsia-400">new</span> <span class="text-emerald-300">Fch</span>(<span class="text-amber-300">"https://api.example.com/v1/search"</span>);
+
+req.pathname = <span class="text-amber-300">"/v2/search"</span>;        <span class="text-slate-500">// plain URL property</span>
+req.searchParams.<span class="text-sky-300">set</span>(<span class="text-amber-300">"q"</span>, <span class="text-amber-300">"Tom &amp; Jerry"</span>); <span class="text-slate-500">// encoded for you</span>
+req.searchParams.<span class="text-sky-300">append</span>(<span class="text-amber-300">"tag"</span>, <span class="text-amber-300">"new"</span>);
+
+<span class="text-slate-500">// It is also the request</span>
+<span class="text-fuchsia-400">const</span> [data, res] = <span class="text-fuchsia-400">await</span> req.<span class="text-sky-300">json</span>&lt;<span class="text-teal-300">Results</span>&gt;();
+
+req <span class="text-fuchsia-400">instanceof</span> URL  <span class="text-slate-500">// true</span>
+</code></pre>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ============================================================ the problem -->
+<section class="border-b border-slate-200 bg-slate-50/60">
+	<div class="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+		<div class="max-w-2xl">
+			<p class="text-xs font-semibold uppercase tracking-wider text-indigo-600">The problem</p>
+			<h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+				<code class="font-mono text-slate-900">fetch</code> is a primitive. Every app rebuilds the same layer.
+			</h2>
+			<p class="mt-4 text-[15px] leading-7 text-slate-600">
+				Timeouts, retries with backoff, HTTP error handling, JSON bodies, query encoding,
+				duplicate in-flight requests — none of it ships with <code class="font-mono text-slate-800">fetch</code>.
+				So it gets rewritten, differently, in every project. That is where the bugs live.
+			</p>
+		</div>
+
+		<div class="mt-10 grid gap-4 md:grid-cols-3">
+			<div class="rounded-xl border border-slate-200 bg-white p-5">
+				<div class="font-mono text-[11px] uppercase tracking-wider text-rose-500">silent bug</div>
+				<h3 class="mt-2 text-[15px] font-semibold text-slate-900">Objects become <code class="font-mono text-[0.9em]">[object Object]</code></h3>
+				<p class="mt-2 text-sm leading-6 text-slate-600">
+					<code class="font-mono text-xs">fetch(url, { body: { name: "Cottage" } })</code> does not throw.
+					It sends the literal string with <code class="font-mono text-xs">text/plain</code>.
+				</p>
+			</div>
+			<div class="rounded-xl border border-slate-200 bg-white p-5">
+				<div class="font-mono text-[11px] uppercase tracking-wider text-amber-600">silent hang</div>
+				<h3 class="mt-2 text-[15px] font-semibold text-slate-900">No timeout, ever</h3>
+				<p class="mt-2 text-sm leading-6 text-slate-600">
+					There is no <code class="font-mono text-xs">timeout</code> option. A stalled connection
+					waits until the runtime gives up — which can be never.
+				</p>
+			</div>
+			<div class="rounded-xl border border-slate-200 bg-white p-5">
+				<div class="font-mono text-[11px] uppercase tracking-wider text-amber-600">silent pass</div>
+				<h3 class="mt-2 text-[15px] font-semibold text-slate-900">500 is a success</h3>
+				<p class="mt-2 text-sm leading-6 text-slate-600">
+					<code class="font-mono text-xs">await fetch()</code> resolves on a <code class="font-mono text-xs">404</code>.
+					The failure surfaces later, as <code class="font-mono text-xs">undefined</code> three layers away.
+				</p>
+			</div>
+		</div>
+
+		<div class="mt-8 grid gap-4 lg:grid-cols-2">
+			<div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+				<div class="flex items-center gap-2 border-b border-slate-200 px-4 py-2.5">
+					<span class="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase text-slate-500">plain fetch</span>
+				</div>
+<pre class="overflow-x-auto p-4 font-mono text-[12px] leading-6 text-slate-700"><code><span class="text-slate-500">// timeout + retry + error handling, by hand</span>
+<span class="text-fuchsia-600">const</span> c = <span class="text-fuchsia-600">new</span> <span class="text-emerald-700">AbortController</span>();
+<span class="text-fuchsia-600">const</span> id = <span class="text-sky-700">setTimeout</span>(() =&gt; c.<span class="text-sky-700">abort</span>(), <span class="text-teal-700">5000</span>);
+<span class="text-fuchsia-600">let</span> last;
+<span class="text-fuchsia-600">for</span> (<span class="text-fuchsia-600">let</span> i = <span class="text-teal-700">0</span>; i &lt; <span class="text-teal-700">4</span>; i++) {
+  <span class="text-fuchsia-600">try</span> {
+    <span class="text-fuchsia-600">const</span> res = <span class="text-fuchsia-600">await</span> <span class="text-sky-700">fetch</span>(url, { signal: c.signal });
+    <span class="text-fuchsia-600">if</span> (!res.ok) <span class="text-fuchsia-600">throw</span> <span class="text-fuchsia-600">new</span> <span class="text-emerald-700">Error</span>(res.status);
+    <span class="text-fuchsia-600">return</span> res.<span class="text-sky-700">json</span>();
+  } <span class="text-fuchsia-600">catch</span> (e) { last = e; }
+  <span class="text-fuchsia-600">await</span> <span class="text-sky-700">sleep</span>(<span class="text-teal-700">500</span> * <span class="text-teal-700">2</span> ** i); <span class="text-slate-500">// no jitter</span>
+}
+<span class="text-fuchsia-600">throw</span> last; <span class="text-slate-500">// and the timer still leaks</span></code></pre>
+			</div>
+			<div class="overflow-hidden rounded-xl border border-indigo-200 bg-white shadow-sm">
+				<div class="flex items-center gap-2 border-b border-indigo-200 bg-indigo-50 px-4 py-2.5">
+					<span class="rounded bg-indigo-600 px-1.5 py-0.5 font-mono text-[10px] font-medium uppercase text-white">fch</span>
+				</div>
+<pre class="overflow-x-auto p-4 font-mono text-[12px] leading-6 text-slate-700"><code><span class="text-slate-500">// the same job, declared once</span>
+<span class="text-fuchsia-600">const</span> api = <span class="text-fuchsia-600">new</span> <span class="text-emerald-700">Fch</span>(<span class="text-amber-700">"https://api.example.com/orders"</span>, {
+  timeout: <span class="text-teal-700">5_000</span>,
+  retries: <span class="text-teal-700">3</span>,
+  retryDelay: <span class="text-teal-700">500</span>,
+  retryOn: (r) =&gt; !!r &amp;&amp; r.status &gt;= <span class="text-teal-700">500</span>,
+});
+
+<span class="text-fuchsia-600">const</span> [orders] = <span class="text-fuchsia-600">await</span> api.<span class="text-sky-700">json</span>&lt;<span class="text-teal-700">Order</span>[]&gt;();
+
+<span class="text-slate-500">// backoff: 500ms, 1s, 2s — each ±20% jitter</span>
+<span class="text-slate-500">// abort() is never retried, timers are cleaned up</span></code></pre>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ============================================================ features -->
+<section class="border-b border-slate-200">
+	<div class="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+		<div class="max-w-2xl">
+			<p class="text-xs font-semibold uppercase tracking-wider text-indigo-600">What you get</p>
+			<h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Everything around the request, nothing around that.</h2>
+			<p class="mt-4 text-[15px] leading-7 text-slate-600">
+				No second HTTP stack. <code class="font-mono text-slate-800">Fch</code> calls the global
+				<code class="font-mono text-slate-800">fetch</code> — it just stops you from writing the same
+				sixty lines before every call.
+			</p>
+		</div>
+
+		<div class="mt-10 grid gap-x-8 gap-y-9 sm:grid-cols-2 lg:grid-cols-3">
+			<div>
+				<div class="grid h-9 w-9 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 007 0l2-2a5 5 0 00-7-7l-1 1"/><path d="M14 11a5 5 0 00-7 0l-2 2a5 5 0 007 7l1-1"/></svg>
+				</div>
+				<h3 class="mt-3 text-[15px] font-semibold text-slate-900">URL-first, not URL-adjacent</h3>
+				<p class="mt-1.5 text-sm leading-6 text-slate-600">Extends <code class="font-mono text-xs">URL</code>: <code class="font-mono text-xs">pathname</code>, <code class="font-mono text-xs">host</code>, <code class="font-mono text-xs">origin</code>, <code class="font-mono text-xs">searchParams</code>, <code class="font-mono text-xs">hash</code>, <code class="font-mono text-xs">toString()</code>. Mutations change the request target.</p>
+			</div>
+			<div>
+				<div class="grid h-9 w-9 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 019-9 9.7 9.7 0 016.7 2.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 01-9 9 9.7 9.7 0 01-6.7-2.7L3 16"/><path d="M3 21v-5h5"/></svg>
+				</div>
+				<h3 class="mt-3 text-[15px] font-semibold text-slate-900">Retries that are correct</h3>
+				<p class="mt-1.5 text-sm leading-6 text-slate-600">Exponential backoff with jitter, capped. User aborts are never retried. One <code class="font-mono text-xs">retryOn(response, error, attempt)</code> predicate decides everything.</p>
+			</div>
+			<div>
+				<div class="grid h-9 w-9 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+				</div>
+				<h3 class="mt-3 text-[15px] font-semibold text-slate-900">Per-attempt timeouts</h3>
+				<p class="mt-1.5 text-sm leading-6 text-slate-600">Independent of the retry loop, so a slow attempt is retried instead of killing the request. Combines with your own <code class="font-mono text-xs">AbortSignal</code>.</p>
+			</div>
+			<div>
+				<div class="grid h-9 w-9 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/></svg>
+				</div>
+				<h3 class="mt-3 text-[15px] font-semibold text-slate-900">Dedupe &amp; idempotency</h3>
+				<p class="mt-1.5 text-sm leading-6 text-slate-600">Concurrent identical GETs collapse to one request; each caller still gets a readable response. Writes need an explicit key, sent as <code class="font-mono text-xs">Idempotency-Key</code>.</p>
+			</div>
+			<div>
+				<div class="grid h-9 w-9 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg>
+				</div>
+				<h3 class="mt-3 text-[15px] font-semibold text-slate-900">Forms as first-class bodies</h3>
+				<p class="mt-1.5 text-sm leading-6 text-slate-600">Pass the <code class="font-mono text-xs">&lt;form&gt;</code>, the submit <code class="font-mono text-xs">Event</code>, or <code class="font-mono text-xs">FormData</code>. The form's own method, the clicked submit button and the multipart boundary are handled.</p>
+			</div>
+			<div>
+				<div class="grid h-9 w-9 place-items-center rounded-lg bg-indigo-50 text-indigo-600">
+					<svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M8 21H5a2 2 0 01-2-2v-3M16 21h3a2 2 0 002-2v-3"/><path d="M9 12h6"/></svg>
+				</div>
+				<h3 class="mt-3 text-[15px] font-semibold text-slate-900">Typed tuples, not guesswork</h3>
+				<p class="mt-1.5 text-sm leading-6 text-slate-600"><code class="font-mono text-xs">await req.json&lt;User&gt;()</code> resolves to <code class="font-mono text-xs">[data, response]</code> — so the parsed body and the status are both there, without a second read.</p>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ============================================================ playground -->
+<section class="border-b border-slate-200 bg-slate-900" x-data="playground()">
+	<div class="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+		<div class="max-w-2xl">
+			<p class="text-xs font-semibold uppercase tracking-wider text-indigo-400">Try it</p>
+			<h2 class="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">Edit the URL. Watch the request change.</h2>
+			<p class="mt-4 text-[15px] leading-7 text-slate-400">
+				This runs the real library in your browser. Nothing is sent anywhere — the example
+				just shows what <code class="font-mono text-slate-200">Fch</code> would put on the wire.
+			</p>
+		</div>
+
+		<div class="mt-8 grid gap-4 lg:grid-cols-2">
+			<div class="rounded-xl border border-slate-700 bg-slate-800/60 p-5">
+				<label for="pg-path" class="block text-xs font-semibold uppercase tracking-wider text-slate-400">pathname</label>
+				<input id="pg-path" type="text" x-model="path" x-on:input="update()" class="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-indigo-500">
+
+				<div class="mt-4 grid grid-cols-2 gap-3">
+					<div>
+						<label for="pg-key" class="block text-xs font-semibold uppercase tracking-wider text-slate-400">searchParams key</label>
+						<input id="pg-key" type="text" x-model="key" x-on:input="update()" class="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-indigo-500">
+					</div>
+					<div>
+						<label for="pg-value" class="block text-xs font-semibold uppercase tracking-wider text-slate-400">value</label>
+						<input id="pg-value" type="text" x-model="value" x-on:input="update()" class="mt-2 w-full rounded-lg border border-slate-600 bg-slate-900 px-3 py-2 font-mono text-sm text-slate-100 outline-none focus:border-indigo-500">
+					</div>
+				</div>
+
+				<div class="mt-5 space-y-2">
+					<button type="button" x-on:click="run()" class="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-500">
+						Run <span class="font-mono">req.json()</span> against a mock
+					</button>
+					<p class="text-center font-mono text-[11px] text-slate-500">mock fetch, no network</p>
+				</div>
+			</div>
+
+			<div class="rounded-xl border border-slate-700 bg-slate-950 p-5 font-mono text-[12.5px] leading-6">
+				<p class="text-[11px] uppercase tracking-wider text-slate-500">request that would be sent</p>
+				<pre class="mt-2 whitespace-pre-wrap break-all text-slate-300" x-text="url"></pre>
+
+				<p class="mt-4 text-[11px] uppercase tracking-wider text-slate-500">response</p>
+				<pre class="mt-2 whitespace-pre-wrap break-all text-emerald-300" x-text="output"></pre>
+
+				<div class="mt-4 flex flex-wrap gap-2 text-[11px]">
+					<span class="rounded-full bg-slate-800 px-2.5 py-1 text-slate-400" x-text="'status ' + status"></span>
+					<span class="rounded-full bg-slate-800 px-2.5 py-1 text-slate-400" x-text="'method ' + method"></span>
+					<span class="rounded-full bg-slate-800 px-2.5 py-1 text-slate-400" x-text="'calls ' + calls"></span>
+				</div>
+			</div>
+		</div>
+	</div>
+</section>
+
+<!-- ============================================================ comparison teaser -->
+<section class="border-b border-slate-200">
+	<div class="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+		<div class="flex flex-wrap items-end justify-between gap-4">
+			<div class="max-w-2xl">
+				<p class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Comparison</p>
+				<h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">Smaller than axios, bigger than fetch.</h2>
+				<p class="mt-4 text-[15px] leading-7 text-slate-600">
+					Measured, not claimed. Sizes are gzipped minified bundles from bundlephobia for the
+					latest published versions.
+				</p>
+			</div>
+			<a href="docs/vs-libraries.html" class="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-800">
+				Full comparison
+				<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+			</a>
+		</div>
+
+		<div class="mt-8 overflow-x-auto rounded-xl border border-slate-200">
+			<table class="w-full min-w-[46rem] border-collapse text-left text-sm">
+				<thead>
+					<tr class="bg-slate-50">
+						<th class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">Library</th>
+						<th class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">Gzipped</th>
+						<th class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">Deps</th>
+						<th class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">Instance is a <code class="font-mono text-xs">URL</code></th>
+						<th class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">Retry + timeout</th>
+						<th class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">Dedupe</th>
+						<th class="border-b border-slate-200 px-4 py-3 font-semibold text-slate-900">Form body</th>
+					</tr>
+				</thead>
+				<tbody class="text-slate-700">
+					<tr class="bg-white">
+						<td class="border-b border-slate-200 px-4 py-3 font-mono text-xs text-slate-500">fetch</td>
+						<td class="border-b border-slate-200 px-4 py-3">0 kB</td>
+						<td class="border-b border-slate-200 px-4 py-3">0</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+					</tr>
+					<tr class="bg-indigo-50/70">
+						<td class="border-b border-slate-200 px-4 py-3 font-mono text-xs font-semibold text-indigo-700">@westtrade/fch</td>
+						<td class="border-b border-slate-200 px-4 py-3 font-semibold">~5.5 kB</td>
+						<td class="border-b border-slate-200 px-4 py-3 font-semibold">0</td>
+						<td class="border-b border-slate-200 px-4 py-3 font-semibold text-emerald-600">✓</td>
+						<td class="border-b border-slate-200 px-4 py-3 font-semibold text-emerald-600">✓</td>
+						<td class="border-b border-slate-200 px-4 py-3 font-semibold text-emerald-600">✓</td>
+						<td class="border-b border-slate-200 px-4 py-3 font-semibold text-emerald-600">✓</td>
+					</tr>
+					<tr class="bg-white">
+						<td class="border-b border-slate-200 px-4 py-3 font-mono text-xs text-slate-500">axios</td>
+						<td class="border-b border-slate-200 px-4 py-3">~19 kB</td>
+						<td class="border-b border-slate-200 px-4 py-3">4</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-amber-600">timeout only</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+					</tr>
+					<tr class="bg-white">
+						<td class="border-b border-slate-200 px-4 py-3 font-mono text-xs text-slate-500">ky</td>
+						<td class="border-b border-slate-200 px-4 py-3">~10.7 kB</td>
+						<td class="border-b border-slate-200 px-4 py-3">0</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-emerald-600">✓</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+					</tr>
+					<tr class="bg-white">
+						<td class="border-b border-slate-200 px-4 py-3 font-mono text-xs text-slate-500">ofetch</td>
+						<td class="border-b border-slate-200 px-4 py-3">~3.9 kB</td>
+						<td class="border-b border-slate-200 px-4 py-3">3</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-emerald-600">✓</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+						<td class="border-b border-slate-200 px-4 py-3 text-rose-500">✗</td>
+					</tr>
+					<tr class="bg-white">
+						<td class="px-4 py-3 font-mono text-xs text-slate-500">wretch</td>
+						<td class="px-4 py-3">~1.8 kB</td>
+						<td class="px-4 py-3">0</td>
+						<td class="px-4 py-3 text-rose-500">✗</td>
+						<td class="px-4 py-3 text-amber-600">addons</td>
+						<td class="px-4 py-3 text-rose-500">✗</td>
+						<td class="px-4 py-3 text-rose-500">✗</td>
+					</tr>
+				</tbody>
+			</table>
+		</div>
+		<p class="mt-3 text-xs text-slate-500">
+			<code class="font-mono">Fch</code> measured from its own build with esbuild; others from bundlephobia.
+			Where another library is the better choice, the
+			<a href="docs/vs-libraries.html" class="font-medium text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-800">comparison page says so</a>.
+		</p>
+	</div>
+</section>
+
+<!-- ============================================================ quickstart -->
+<section class="border-b border-slate-200 bg-slate-50/60">
+	<div class="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+		<div class="grid gap-10 lg:grid-cols-2">
+			<div>
+				<p class="text-xs font-semibold uppercase tracking-wider text-indigo-600">Quick start</p>
+				<h2 class="mt-3 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">One import. No setup.</h2>
+				<p class="mt-4 text-[15px] leading-7 text-slate-600">
+					<code class="font-mono text-slate-800">Fch</code> uses the global
+					<code class="font-mono text-slate-800">fetch</code>, so it works anywhere fetch does:
+					browsers, Node 18+, Deno, Bun, workers. There is nothing to configure.
+				</p>
+
+				<div class="mt-6 space-y-3">
+					<a href="docs/getting-started.html" class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition hover:border-indigo-300 hover:bg-indigo-50/40">
+						<span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-xs font-semibold text-white">1</span>
+						<span><span class="block text-sm font-medium text-slate-900">Getting started</span><span class="block text-xs text-slate-500">Install, first request, the mental model</span></span>
+					</a>
+					<a href="docs/url-first.html" class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition hover:border-indigo-300 hover:bg-indigo-50/40">
+						<span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-xs font-semibold text-white">2</span>
+						<span><span class="block text-sm font-medium text-slate-900">The URL is the request</span><span class="block text-xs text-slate-500">Why one object instead of two</span></span>
+					</a>
+					<a href="docs/retries.html" class="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3.5 transition hover:border-indigo-300 hover:bg-indigo-50/40">
+						<span class="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-600 text-xs font-semibold text-white">3</span>
+						<span><span class="block text-sm font-medium text-slate-900">Retries &amp; timeouts</span><span class="block text-xs text-slate-500">The part fetch makes you write yourself</span></span>
+					</a>
+				</div>
+			</div>
+
+			<div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+				<div class="flex items-center gap-2 border-b border-slate-800 px-4 py-3">
+					<span class="font-mono text-[11px] text-slate-500">app.ts</span>
+				</div>
+<pre class="overflow-x-auto p-5 font-mono text-[12.5px] leading-6 text-slate-300"><code><span class="text-fuchsia-400">import</span> { Fch, fch } <span class="text-fuchsia-400">from</span> <span class="text-amber-300">"@westtrade/fch"</span>;
+
+<span class="text-slate-500">// a one-off request</span>
+<span class="text-fuchsia-400">const</span> [user] = <span class="text-fuchsia-400">await</span> <span class="text-fuchsia-400">new</span> <span class="text-emerald-300">Fch</span>(<span class="text-amber-300">"https://api.example.com/me"</span>, {
+  timeout: <span class="text-teal-300">3_000</span>,
+}).<span class="text-sky-300">json</span>&lt;<span class="text-teal-300">User</span>&gt;();
+
+<span class="text-slate-500">// a configured client</span>
+<span class="text-fuchsia-400">const</span> api = fch.<span class="text-sky-300">create</span>({
+  baseUrl: <span class="text-amber-300">"https://api.example.com"</span>,
+  retries: <span class="text-teal-300">2</span>,
+  timeout: <span class="text-teal-300">5_000</span>,
+});
+
+<span class="text-fuchsia-400">const</span> [houses] = <span class="text-fuchsia-400">await</span> api.<span class="text-sky-300">get</span>&lt;<span class="text-teal-300">House</span>[]&gt;(<span class="text-amber-300">"/houses"</span>);
+api.<span class="text-sky-300">post</span>(<span class="text-amber-300">"/houses"</span>, { name: <span class="text-amber-300">"Cottage"</span> }); <span class="text-slate-500">// JSON</span>
+</code></pre>
+			</div>
+		</div>
+	</div>
+</section>
+
+</main>
+
+<footer class="bg-white">
+	<div class="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-10 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+		<p>MIT licensed. Built with <code class="font-mono text-slate-700">fetch</code>, <code class="font-mono text-slate-700">URL</code> and nothing else.</p>
+		<p class="flex gap-4">
+			<a href="https://github.com/westtrade/Fch" class="hover:text-slate-900">GitHub</a>
+			<a href="docs/getting-started.html" class="hover:text-slate-900">Docs</a>
+			<a href="docs/api.html" class="hover:text-slate-900">API</a>
+		</p>
+	</div>
+</footer>
+
+<script>
+// The playground drives the real library (assets/fch.min.js, a classic script
+// exposing window.FchDemo) and stubs fetch, so the demo exercises Fch itself
+// rather than a reimplementation of it. A classic script, not a module, so the
+// page also works when opened straight from disk over file://.
+function playground() {
+	return {
+		path: '/v2/search',
+		key: 'q',
+		value: 'Tom & Jerry',
+		url: '',
+		output: '',
+		status: '—',
+		method: 'GET',
+		calls: 0,
+		Fch: null,
+
+		async init() {
+			await this.load();
+			this.update();
+			this.run();
+		},
+
+		async load() {
+			if (this.Fch) return this.Fch;
+			this.Fch = window.FchDemo?.Fch;
+			if (!this.Fch) throw new Error('library bundle did not load');
+			return this.Fch;
+		},
+
+		build() {
+			const req = new this.Fch('https://api.example.com/v1/search', { timeout: 5000 });
+			req.pathname = this.path;
+			req.searchParams.set(this.key, this.value);
+			req.searchParams.append('tag', 'new');
+			return req;
+		},
+
+		update() {
+			if (!this.Fch) return;
+			try {
+				this.url = this.build().toString();
+			} catch (e) {
+				this.url = 'invalid URL: ' + e.message;
+			}
+		},
+
+		async run() {
+			try {
+				await this.load();
+			} catch (e) {
+				this.output = 'could not load the library: ' + e.message;
+				return;
+			}
+			this.update();
+			const calls = [];
+			const original = window.fetch;
+			window.fetch = async (url, init) => {
+				calls.push({ url: String(url), init });
+				return new Response(JSON.stringify({ items: [{ id: 1, name: 'Cottage' }], total: 1 }), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			};
+			try {
+				const req = this.build();
+				const [data, response] = await req.json();
+				this.method = req.method;
+				this.status = String(response.status);
+				this.calls = calls.length;
+				this.output = JSON.stringify(data, null, 2);
+			} catch (e) {
+				this.output = 'error: ' + e.message;
+			} finally {
+				window.fetch = original;
+			}
+		},
+	};
+}
+</script>
+</body>
+</html>

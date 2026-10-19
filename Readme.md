@@ -2,12 +2,14 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
+📖 **[Documentation & live examples →](https://westtrade.github.io/Fch/)**
+
 `Fch` is not a wrapper around `fetch`. It **extends the native `URL` class**, so a single object is
 both a real, fully mutable URL and the request that targets it. You build the URL with the standard
 platform API, then execute it — with retries, timeouts, deduplication and typed body helpers on top.
 
 ```ts
-import { Fch } from "fch";
+import { Fch } from "@westtrade/fch";
 
 const req = new Fch("https://api.example.com/v1/search");
 
@@ -37,18 +39,34 @@ client" step. `req instanceof URL` is `true`.
 
 ## Installation
 
+The package is scoped as **`@westtrade/fch`**. The unscoped name `fch` on npm
+belongs to an unrelated library, so `npm install fch` would install the wrong
+code.
+
 ```bash
-npm install fch
+npm install github:westtrade/Fch#v1.2.4
 # or
-yarn add fch
+yarn add github:westtrade/Fch#v1.2.4
 ```
+
+It installs as `@westtrade/fch` regardless of how you fetch it:
+
+```ts
+import { Fch } from "@westtrade/fch";
+```
+
+Pin a release tag (see [tags](https://github.com/westtrade/Fch/tags)) so an
+install is reproducible; omit `#v1.2.4` to follow the default branch.
+
+The package has no runtime dependencies. A git install compiles `dist/` for you
+via `prepare`; if you vendor the source, run `npm install && npm run build` once.
 
 ## Usage
 
 ### The URL is the request
 
 ```ts
-import { Fch } from "fch";
+import { Fch } from "@westtrade/fch";
 
 const req = new Fch("https://api.example.com/v1/items?page=1");
 
