@@ -166,6 +166,23 @@ describe("documentation site", () => {
 		}
 	});
 
+	test("the docs header shows the package version", () => {
+		// The header badge used to be hardcoded in the page template and drifted
+		// to v1.2.3 while the package was at 1.3.0. It is now read from
+		// package.json at build time, so assert the template does not hardcode a
+		// version and that the built pages agree with package.json.
+		const template = readFileSync(resolve(root, "scripts/build-site.mjs"), "utf8");
+		expect(template, "build-site.mjs hardcodes a version badge").not.toMatch(/>v\d+\.\d+\.\d+</);
+		expect(template, "build-site.mjs does not read the version").toContain("pkg.version");
+
+		const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
+		const built = resolve(root, "site/docs/api.html");
+		if (!existsSync(built)) return; // site is generated; skip before `npm run site`
+
+		const html = readFileSync(built, "utf8");
+		expect(html, "built page shows a stale version").toContain(`v${pkg.version}`);
+	});
+
 	test("the package is buildable from a git install", () => {
 		// A git install runs `prepare`, not `prepublishOnly`; without it the
 		// installed package has no dist/ and cannot be imported. This is a

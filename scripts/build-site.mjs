@@ -121,6 +121,11 @@ marked.use({ renderer })
 // ---------------------------------------------------------------- templates
 const SITE_NAME = 'Fch'
 const GITHUB = 'https://github.com/westtrade/Fch'
+
+// The version badge is read from package.json. Hardcoding it is how it drifted
+// to v1.2.3 while the package was at 1.3.0.
+const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+const VERSION = pkg.version
 // There is no npm package to link: the `fch` name on npm belongs to another
 // author's library. Every "npm" affordance points at the repository instead.
 
@@ -164,7 +169,7 @@ const header = () => `
 		<a href="../index.html" class="flex items-center gap-2.5">
 			<span class="grid h-8 w-8 place-items-center rounded-lg bg-slate-900 font-mono text-sm font-bold text-white">F</span>
 			<span class="text-[15px] font-semibold tracking-tight text-slate-900">Fch</span>
-			<span class="hidden rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-500 sm:inline">v1.2.3</span>
+			<span class="hidden rounded-full bg-slate-100 px-2 py-0.5 font-mono text-[10px] text-slate-500 sm:inline">v${VERSION}</span>
 		</a>
 		<span class="hidden text-slate-300 sm:inline">/</span>
 		<a href="getting-started.html" class="hidden text-sm text-slate-500 hover:text-slate-900 sm:inline">Docs</a>
