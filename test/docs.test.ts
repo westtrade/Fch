@@ -240,3 +240,40 @@ describe("example tabs", () => {
 		}
 	});
 });
+
+describe("tab header legibility", () => {
+	// The header used a translucent `bg-slate-800/60`, so the white page showed
+	// through and the inactive labels washed out. Assert the bar is opaque and
+	// the active tab has its own surface, not just a different text colour.
+	const buildScript = readFileSync(resolve(root, "scripts/build-site.mjs"), "utf8");
+
+	test("the tab bar has an opaque background", () => {
+		// Classes precede `role` in the tag, so capture the whole element.
+		const bar = buildScript.match(/<div class="[^"]*"[^>]*role="tablist"/)?.[0] ?? "";
+		expect(bar).toContain("bg-slate-900");
+		// No `bg-slate-800/60`-style translucency on the bar.
+		expect(bar).not.toMatch(/bg-slate-\d+\/\d+/);
+	});
+
+	test("the active tab is distinguishable by surface, not colour alone", () => {
+		// Active: solid slate-800 + white text. Inactive: transparent + slate-400.
+		expect(buildScript).toContain("bg-slate-800 text-white");
+		expect(buildScript).toContain("text-slate-400");
+	});
+
+	test("inactive label colour meets WCAG AA on the bar", () => {
+		// slate-400 (#94a3b8) on slate-900 (#0f172a) = 6.96:1.
+		const lin = (v: number) => {
+			v /= 255;
+			return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+		};
+		const lum = ([r, g, b]: number[]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+		const ratio = (a: number[], b: number[]) => {
+			const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m);
+			return (x + 0.05) / (y + 0.05);
+		};
+		const slate400 = [148, 163, 184];
+		const slate900 = [15, 23, 42];
+		expect(ratio(slate400, slate900)).toBeGreaterThanOrEqual(4.5);
+	});
+});

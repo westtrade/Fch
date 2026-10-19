@@ -124,7 +124,7 @@ function renderTabs(text) {
 	const code = (section) => section.lines.join('\n').replace(/^\n+|\n+$/g, '')
 	const buttons = sections
 		.map(
-			(section, i) => `<button type="button" role="tab" x-on:click="tab = '${section.key}'" :aria-selected="tab === '${section.key}'" :class="tab === '${section.key}' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'" class="border-b-2 px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider transition"${i === 0 ? ' id="tab-first"' : ''}>${escapeHtml(TAB_LABELS[section.key] || section.key)}</button>`
+			(section, i) => `<button type="button" role="tab" x-on:click="tab = '${section.key}'" :aria-selected="tab === '${section.key}'" :class="tab === '${section.key}' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-100'" class="rounded-t-md px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider transition"${i === 0 ? ' id="tab-first"' : ''}>${escapeHtml(TAB_LABELS[section.key] || section.key)}</button>`
 		)
 		.join('')
 
@@ -132,13 +132,13 @@ function renderTabs(text) {
 		.map(
 			(section) => `<div x-show="tab === '${section.key}'" x-cloak role="tabpanel" class="group relative">
 <button type="button" class="absolute right-2 top-2 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 opacity-0 transition hover:bg-slate-700 focus:opacity-100 group-hover:opacity-100" x-on:click="navigator.clipboard.writeText($el.parentElement.querySelector('code').innerText); copied = true; setTimeout(() => copied = false, 1400)" x-text="copied ? 'copied' : 'copy'">copy</button>
-<pre class="!rounded-t-none !pt-9"><code class="hljs language-ts">${highlight(code(section), 'ts')}</code></pre>
+<pre class="!mt-0 !rounded-t-none !pt-9"><code class="hljs language-ts">${highlight(code(section), 'ts')}</code></pre>
 </div>`
 		)
 		.join('\n')
 
 	return `<div class="my-5" x-data="{ tab: '${sections[0].key}', copied: false }">
-<div class="flex gap-1 rounded-t-xl border border-b-0 border-slate-700 bg-slate-800/60 px-2 pt-1" role="tablist">${buttons}</div>
+<div class="flex gap-1 rounded-t-xl border border-b-0 border-slate-700 bg-slate-900 px-2 pt-1" role="tablist">${buttons}</div>
 ${panels}
 </div>`
 }
