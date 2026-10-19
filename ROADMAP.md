@@ -14,36 +14,62 @@ measurement taken at v1.2.5, so progress is checkable rather than aspirational.
 The hypothesis: shorter code means fewer output tokens, and a compact
 instruction set means fewer input tokens.
 
-Same task, a `GET` returning JSON, measured in characters:
+### Measured with a real tokenizer
 
-| Chars | Spelling |
-| --- | --- |
-| 41 | `` fch`https://a.test/u/1` `` |
-| 44 | `ofetch("https://a.test/u/1")` |
-| 47 | `ky("https://a.test/u/1").json()` |
-| 54 | `new Fch("https://a.test/u/1").json()` |
-| 54 | `axios.get("https://a.test/u/1")` → `{ data }` |
-| 57 | `wretch("…").get().json()` |
-| 69 | `fetch(…)` + `.json()` |
-| 150 | `fetch(…)` with timeout (`AbortController` + `setTimeout`) |
+Characters are a proxy; tokens are what you pay for. Measured with a BPE
+tokenizer (`gpt-tokenizer`, cl100k), counting the code a developer writes for
+each task. Reproduce with `node scripts/measure-tokens.mjs`; the numbers are
+guarded by its `--check` flag, so this table cannot rot silently.
 
-The largest win is not the one-liner but query building: the URL *is* the
-request object, so params need no string assembly.
+**Simple tasks — one-liners.** `Fch` is *not* the cheapest here:
 
-```js
-// native: 121 chars
-const u = new URL("https://a.test/u");
-u.searchParams.set("page", "2");
-const r = await fetch(u);
-const d = await r.json();
+| Library | Tokens | vs Fch |
+| --- | --- | --- |
+| axios | 88 | 3 fewer |
+| **Fch** | **91** | — |
+| ky | 96 | 5 more |
+| ofetch | 102 | 11 more |
+| native `fetch` | 140 | 49 more |
 
-// Fch: no URL/request hand-off
-const req = new Fch("https://a.test/u");
-req.searchParams.set("page", "2");
-const [d] = await req.json();
-```
+**Hard tasks — dedupe, retry, abort with a reusable builder.** Here the others
+need a hand-written helper, and the gap is wide:
 
-**The trap.** Short code saves *output* tokens, but a long manual spends *input*
+| Library | Tokens | vs Fch |
+| --- | --- | --- |
+| **Fch** | **78** | — |
+| ky | 144 | 66 more |
+| ofetch | 153 | 75 more |
+| axios | 157 | 79 more |
+| native `fetch` | 229 | 151 more |
+
+Per task:
+
+| Task | Fch | ofetch | ky | axios | native |
+| --- | --- | --- | --- | --- | --- |
+| GET JSON | 17 | 15 | 16 | 19 | 21 |
+| POST JSON | 17 | 26 | 21 | 17 | 39 |
+| query params | 26 | 20 | 22 | 20 | 25 |
+| timeout | 20 | 17 | 18 | 17 | 32 |
+| form submit | 11 | 24 | 19 | 15 | 23 |
+| dedupe concurrent GET | 25 | 92 | 90 | 92 | 90 |
+| retry with backoff | 26 | 23 | 18 | 27 | 106 |
+| abort + reuse builder | 27 | 38 | 36 | 38 | 33 |
+
+The honest headline is **"~70–150 tokens cheaper on tasks with dedupe, retry or
+abort; about the same as a one-liner library on simple calls"** — not "the
+shortest library". axios wins a bare `GET` by three tokens.
+
+### How to quote this honestly
+
+- Never say "the shortest library": on a bare one-liner axios is smaller.
+- Quote the **hard-task** numbers, and say which tasks they are.
+- The counts are code the developer writes. Instruction tokens are a separate
+  cost, and `llms.txt` exists to keep those small.
+- Where a library lacks a feature, the helper the caller must write is counted —
+  not a comment placeholder, which would flatter `Fch` for free.
+- Re-run `node scripts/measure-tokens.mjs` when the API or the competitors move.
+
+**The trap.****The trap.** Short code saves *output* tokens, but a long manual spends *input*
 tokens. Adding more prose to the docs can cost more than the API saves. The
 hierarchy must stay shallow:
 

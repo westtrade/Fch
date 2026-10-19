@@ -154,3 +154,4 @@ site/
 # Scratch dirs for ad-hoc probes
 .probe/
 .measure.mjs
+.tok/
