@@ -146,6 +146,46 @@ describe("published package", () => {
 		expect(out.plugins).toEqual(["nanostores"]);
 	});
 
+	test("the validate plugin resolves as a subpath", async () => {
+		const app = join(workdir, "app");
+		const script = join(app, "validate.mjs");
+		writeFileSync(
+			script,
+			`
+			import validate, { ValidationError, checkSchema } from "@westtrade/fch/plugins/validate";
+			import { Fch } from "@westtrade/fch";
+
+			globalThis.fetch = async () =>
+				new Response(JSON.stringify({ id: "wrong" }), {
+					headers: { "Content-Type": "application/json" },
+				});
+
+			const out = { same: typeof validate === "function", issues: checkSchema(1, { type: "string" }, "").length };
+
+			const req = new Fch("https://x.test/y").use(
+				validate({ schema: { type: "object", required: ["id"], properties: { id: { type: "number" } } } }),
+			);
+
+			try {
+				await req.json();
+				out.rejected = false;
+			} catch (error) {
+				out.rejected = true;
+				out.isValidation = error instanceof ValidationError;
+				out.issueCount = error.issues.length;
+			}
+			console.log(JSON.stringify(out));
+			`,
+		);
+
+		const out = JSON.parse(run(app, [script]).trim().split("\n").pop()!);
+		expect(out.same).toBe(true);
+		expect(out.issues).toBe(1);
+		expect(out.rejected).toBe(true);
+		expect(out.isValidation).toBe(true);
+		expect(out.issueCount).toBeGreaterThan(0);
+	});
+
 	test("CJS: require() of both entries works", () => {
 		const app = join(workdir, "app");
 		const script = join(app, "cjs.cjs");

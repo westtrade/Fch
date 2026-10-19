@@ -55,4 +55,17 @@ export default mod.nanostores
 `,
 )
 
-console.log('dist/Fch.mjs, dist/Fch.literal.mjs and dist/plugins/nanostores.mjs written')
+writeFileSync(
+	resolve(dist, 'plugins/validate.mjs'),
+	`// ESM wrapper around the CommonJS build (generated).
+import mod from './validate.js'
+
+export const validate = mod.validate
+export const checkSchema = mod.checkSchema
+export const ValidationError = mod.ValidationError
+
+export default mod.validate
+`,
+)
+
+console.log('dist/Fch.mjs, dist/Fch.literal.mjs and dist/plugins/*.mjs written')

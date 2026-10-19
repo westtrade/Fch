@@ -139,7 +139,7 @@ as above, or call `use()` explicitly.
 | Add a header to every request | yes |
 | Log timings | yes |
 | Retry policy | no — `setRetryOn()` |
-| Response validation | no — `.after()`, so it can reject properly |
+| Response validation | yes — a hooked plugin, see [Validation](validate.md) |
 
 Interceptors are the built-in mechanism for request/response mutation; plugins
 are for behaviour that needs its own state or that should be reusable across

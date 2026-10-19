@@ -23,6 +23,12 @@
 			"import": "./dist/plugins/nanostores.mjs",
 			"require": "./dist/plugins/nanostores.js",
 			"default": "./dist/plugins/nanostores.js"
+		},
+		"./plugins/validate": {
+			"types": "./dist/plugins/validate.d.ts",
+			"import": "./dist/plugins/validate.mjs",
+			"require": "./dist/plugins/validate.js",
+			"default": "./dist/plugins/validate.js"
 		}
 	},
 	"scripts": {

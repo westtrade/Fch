@@ -19,7 +19,7 @@ describe("documentation site", () => {
 		const expected = [
 			"getting-started", "vs-fetch", "vs-libraries", "url-first", "requests",
 			"reading-responses", "retries", "timeouts", "dedupe", "cancelling",
-			"forms", "shortcuts", "literal", "plugins", "nanostores", "hooks", "logging", "api",
+			"forms", "shortcuts", "literal", "plugins", "nanostores", "validate", "hooks", "logging", "api",
 		];
 		expect(pages.map((p) => p.slug).sort()).toEqual(expected.sort());
 	});

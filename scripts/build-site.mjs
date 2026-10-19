@@ -55,6 +55,7 @@ const NAV = [
 		items: [
 			{ slug: 'plugins', title: 'Plugins', blurb: 'use() and the plugin contract.' },
 			{ slug: 'nanostores', title: 'Nano Stores', blurb: 'A request that is a store, in any framework.' },
+			{ slug: 'validate', title: 'Validation', blurb: 'Reject a body that breaks the contract.' },
 		],
 	},
 	{
