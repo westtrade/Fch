@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/westtrade/Fch/compare/v1.8.0...v1.9.0) (2026-10-19)
+
+
+### Features
+
+* accept a CSS selector in setFormData() ([4bb87ff](https://github.com/westtrade/Fch/commit/4bb87ffb5c5852ae9aa3bf5f53d338e411ad3854))
+
 # [1.8.0](https://github.com/westtrade/Fch/compare/v1.7.2...v1.8.0) (2026-10-19)
 
 
