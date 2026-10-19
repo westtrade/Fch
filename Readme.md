@@ -44,9 +44,9 @@ belongs to an unrelated library, so `npm install fch` would install the wrong
 code.
 
 ```bash
-npm install github:westtrade/Fch#v1.9.0
+npm install github:westtrade/Fch#v1.10.0
 # or
-yarn add github:westtrade/Fch#v1.9.0
+yarn add github:westtrade/Fch#v1.10.0
 ```
 
 It installs as `@westtrade/fch` regardless of how you fetch it:
@@ -56,7 +56,7 @@ import { Fch } from "@westtrade/fch";
 ```
 
 Pin a release tag (see [tags](https://github.com/westtrade/Fch/tags)) so an
-install is reproducible; omit `#v1.9.0` to follow the default branch.
+install is reproducible; omit `#v1.10.0` to follow the default branch.
 
 The package has no runtime dependencies. A git install compiles `dist/` for you
 via `prepare`; if you vendor the source, run `npm install && npm run build` once.
