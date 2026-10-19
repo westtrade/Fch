@@ -5,7 +5,7 @@
 // Two steps: Markdown -> HTML pages, then Tailwind scans site/ and writes
 // site/assets/tailwind.css. The landing page is hand-written HTML in
 // docs-src/index.html.
-import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync, cpSync } from 'node:fs'
+import { readFileSync, writeFileSync, readdirSync, mkdirSync, rmSync, cpSync, existsSync } from 'node:fs'
 import { dirname, resolve, basename } from 'node:path'
 import { marked } from 'marked'
 import hljs from 'highlight.js'
@@ -254,7 +254,12 @@ mkdirSync(resolve(outDir, 'assets'), { recursive: true })
 
 cpSync(resolve(srcDir, 'assets'), resolve(outDir, 'assets'), { recursive: true })
 cpSync(resolve(srcDir, 'vendor'), resolve(outDir, 'assets'), { recursive: true })
-cpSync(resolve(srcDir, 'static'), resolve(outDir), { recursive: true })
+
+// Optional: loose files (robots.txt, CNAME, ...). Git does not track empty
+// directories, so a clean checkout has no docs-src/static — skip it rather
+// than failing the build.
+const staticDir = resolve(srcDir, 'static')
+if (existsSync(staticDir)) cpSync(staticDir, resolve(outDir), { recursive: true })
 
 const pages = flatNav.map((item) => {
 	const file = resolve(srcDir, 'content', `${item.slug}.md`)
