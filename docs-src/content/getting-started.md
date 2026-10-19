@@ -51,14 +51,38 @@ No configuration, no polyfill, no runtime dependencies. `Fch` calls the global
 
 ## Your first request
 
-```ts
+The same call, written three ways. Pick one; they share the same class and the
+same options.
+
+```tabs
+=== class
 import { Fch } from "@westtrade/fch";
 
 const [user, response] = await new Fch("https://api.example.com/users/1")
 	.setAuthToken("my-token")
 	.json<User>();
+=== function
+import { fch } from "@westtrade/fch";
 
-console.log(user.name);      // the parsed body
+const api = fch.create({ baseUrl: "https://api.example.com" });
+
+const [user, response] = await api
+	.request("/users/1", { headers: { Authorization: "Bearer my-token" } })
+	.json<User>();
+=== literal
+import fch from "@westtrade/fch/literal";
+
+const [user, response] =
+	await fch.get`https://api.example.com/users/1`;
+```
+
+The **class** is the most explicit and is what the API reference documents. The
+**function** form is best when several calls share a base URL and defaults. The
+**literal** is the shortest, and is what the rest of these docs use for one-off
+requests.
+
+```ts
+console.log(user.name);       // the parsed body
 console.log(response.status); // 200 — the raw Response is still there
 ```
 
@@ -136,6 +160,16 @@ const [houses] = await api.get<House[]>("/houses");
 await api.post("/houses", { name: "Cute Cottage" }); // object -> JSON body
 ```
 
+A client is the only way to share defaults; the literal entry has no defaults,
+so it is for one-off calls:
+
+```tabs
+=== function
+const [house] = await api.get<House>("/houses/1");
+=== literal
+const [house] = await fch.get<House>`https://api.example.com/houses/1`;
+```
+
 Options passed to `create()` apply to every call; per-call options override
 them. Shortcut calls (`api.get`, `api.post`, …) start their request immediately,
 so they also work in fire-and-forget handlers without `await`.
@@ -152,7 +186,7 @@ Use the setters only for what options cannot express, such as an interceptor or
 a dedupe key factory:
 
 ```ts
-await api.request("/houses").setDedupeKey(() => crypto.randomUUID()).send();
+await api.request("/houses", { dedupeKey: () => crypto.randomUUID() }).send();
 ```
 
 ## CommonJS

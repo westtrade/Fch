@@ -131,12 +131,11 @@ one line:
 const [house] = await api.request("/houses/1", { retries: 5 }).json<House>();
 ```
 
-Setters are for what options cannot express — an interceptor, a dedupe key
-factory, a `DELETE` body, or `poll()`:
+Setters are for what options cannot express — an interceptor, a `DELETE` body,
+or `poll()`:
 
 ```ts
-const req = api.request("/houses")
-	.setDedupeKey(() => crypto.randomUUID())
+const req = api.request("/houses", { dedupeKey: () => crypto.randomUUID() })
 	.after(httpError)
 	.setJsonBody(house);
 
@@ -220,15 +219,15 @@ export const createHouse = (input: HouseInput) =>
 const api = fch.create({ baseUrl: "https://api.example.com" });
 
 const [session] = await api.post<Session>("/login", credentials);
-api.request("/me").setAuthToken(session.token).json<User>();
+api.request("/me", { headers: { Authorization: `Bearer ${session.token}` } }).json<User>();
 ```
 
 Since `create()` defaults are read per call, a token that changes needs to be
-injected per request — use an interceptor on a builder, or a small wrapper:
+injected per request — pass it as a header, or wrap it in a helper:
 
 ```ts
 const authed = <T>(path: string) =>
-	api.request(path).setAuthToken(getToken()).json<T>();
+	api.request(path, { headers: { Authorization: `Bearer ${getToken()}` } }).json<T>();
 ```
 
 ### Fire-and-forget analytics

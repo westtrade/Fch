@@ -87,8 +87,69 @@ renderer.heading = function ({ tokens, depth }) {
 	return `<h${depth} id="${id}">${text}</h${depth}>\n`
 }
 
+// A `tabs` fence renders one example in the three ways it can be written:
+//
+//   ```tabs
+//   === class
+//   const [u] = await new Fch(url).json()
+//   === function
+//   const [u] = await fch.create({}).get(url)
+//   === literal
+//   const [u] = await fch`url`
+//   ```
+//
+// A single fence (rather than consecutive blocks) keeps it one widget, so the
+// selected tab can be tracked in one x-data scope.
+const TAB_LABELS = { class: 'Class', function: 'Function', literal: 'Literal' }
+
+function highlight(text, lang) {
+	const language = lang && hljs.getLanguage(lang) ? lang : 'javascript'
+	return hljs.highlight(text, { language, ignoreIllegals: true }).value
+}
+
+function renderTabs(text) {
+	const sections = []
+	let current = null
+	for (const line of text.split('\n')) {
+		const marker = line.match(/^===\s*(\w+)\s*$/)
+		if (marker) {
+			current = { key: marker[1], lines: [] }
+			sections.push(current)
+			continue
+		}
+		if (current) current.lines.push(line)
+	}
+	if (!sections.length) return null
+
+	const code = (section) => section.lines.join('\n').replace(/^\n+|\n+$/g, '')
+	const buttons = sections
+		.map(
+			(section, i) => `<button type="button" role="tab" x-on:click="tab = '${section.key}'" :aria-selected="tab === '${section.key}'" :class="tab === '${section.key}' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-800'" class="border-b-2 px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider transition"${i === 0 ? ' id="tab-first"' : ''}>${escapeHtml(TAB_LABELS[section.key] || section.key)}</button>`
+		)
+		.join('')
+
+	const panels = sections
+		.map(
+			(section) => `<div x-show="tab === '${section.key}'" x-cloak role="tabpanel" class="group relative">
+<button type="button" class="absolute right-2 top-2 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 opacity-0 transition hover:bg-slate-700 focus:opacity-100 group-hover:opacity-100" x-on:click="navigator.clipboard.writeText($el.parentElement.querySelector('code').innerText); copied = true; setTimeout(() => copied = false, 1400)" x-text="copied ? 'copied' : 'copy'">copy</button>
+<pre class="!rounded-t-none !pt-9"><code class="hljs language-ts">${highlight(code(section), 'ts')}</code></pre>
+</div>`
+		)
+		.join('\n')
+
+	return `<div class="my-5" x-data="{ tab: '${sections[0].key}', copied: false }">
+<div class="flex gap-1 rounded-t-xl border border-b-0 border-slate-700 bg-slate-800/60 px-2 pt-1" role="tablist">${buttons}</div>
+${panels}
+</div>`
+}
+
 // Code blocks: syntax-highlight, and wrap in a copy-button shell.
 renderer.code = ({ text, lang }) => {
+	if (lang === 'tabs') {
+		const tabs = renderTabs(text)
+		if (tabs) return tabs
+	}
+
 	const language = lang && hljs.getLanguage(lang) ? lang : 'javascript'
 	const highlighted = hljs.highlight(text, { language, ignoreIllegals: true }).value
 	const label = lang || 'text'

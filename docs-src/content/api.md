@@ -340,9 +340,7 @@ const [house] = await api
 
 // Write with a stable idempotency key and retries
 await api
-	.request("/houses")
-	.setMethod("POST")
-	.setDedupeKey(() => crypto.randomUUID())
+	.request("/houses", { method: "POST", dedupeKey: () => crypto.randomUUID() })
 	.setJsonBody({ name: "Cottage" })
 	.send();
 ```

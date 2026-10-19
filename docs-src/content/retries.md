@@ -6,10 +6,30 @@ retry loop that is correct by default and configurable in one place.
 
 ## The short version
 
-```ts
+```tabs
+=== class
 const [orders] = await new Fch("https://api.example.com/orders", {
 	retries: 3,        // 1 attempt + 3 retries = 4 total
 	retryDelay: 500,   // base delay, ms
+	maxRetryDelay: 10_000,
+	retryOn: (response) => !!response && (response.status === 429 || response.status >= 500),
+}).json<Order[]>();
+=== function
+const api = fch.create({
+	baseUrl: "https://api.example.com",
+	retries: 3,
+	retryDelay: 500,
+	maxRetryDelay: 10_000,
+	retryOn: (response) => !!response && (response.status === 429 || response.status >= 500),
+});
+
+const [orders] = await api.get<Order[]>("/orders");
+=== literal
+// a literal starts immediately, so retry options set afterwards do not apply to
+// it: build the request from the class when retries matter
+const [orders] = await new Fch("https://api.example.com/orders", {
+	retries: 3,
+	retryDelay: 500,
 	maxRetryDelay: 10_000,
 	retryOn: (response) => !!response && (response.status === 429 || response.status >= 500),
 }).json<Order[]>();
@@ -192,10 +212,11 @@ For writes, pair retries with an idempotency key so the server can deduplicate
 too:
 
 ```ts
-const req = new Fch("https://api.example.com/orders", { retries: 2 })
-	.setMethod("POST")
-	.setDedupeKey(() => crypto.randomUUID()) // sent as Idempotency-Key
-	.setJsonBody(order);
+const req = new Fch("https://api.example.com/orders", {
+	retries: 2,
+	method: "POST",
+	dedupeKey: () => crypto.randomUUID(), // sent as Idempotency-Key
+}).setJsonBody(order);
 
 await req.send();
 ```

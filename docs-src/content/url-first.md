@@ -144,8 +144,10 @@ For everything else, use the standard API directly — `req.searchParams.delete(
 configuration:
 
 ```ts
-const base = new Fch("https://api.example.com/items", { timeout: 5_000 })
-	.setAuthToken(token);
+const base = new Fch("https://api.example.com/items", {
+	timeout: 5_000,
+	headers: { Authorization: `Bearer ${token}` },
+});
 
 const one = base.clone().setSearchParams({ page: 1 });
 const two = base.clone().setSearchParams({ page: 2 });

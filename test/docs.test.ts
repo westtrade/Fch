@@ -192,3 +192,51 @@ describe("documentation site", () => {
 		expect(pkg.scripts.prepare).toContain("build");
 	});
 });
+
+describe("example tabs", () => {
+	// The build renders a ```tabs fence into one widget with a role=tablist.
+	// The renderer lives in scripts/build-site.mjs, so this asserts the contract
+	// between the Markdown convention and the generated markup.
+	const buildScript = readFileSync(resolve(root, "scripts/build-site.mjs"), "utf8");
+
+	test("every tabs fence uses the three known spellings", () => {
+		const allowed = new Set(["class", "function", "literal"]);
+		for (const page of pages) {
+			for (const match of page.body.matchAll(/```tabs\n([\s\S]*?)```/g)) {
+				const keys = [...match[1].matchAll(/^===\s*(\w+)\s*$/gm)].map((m) => m[1]);
+				expect(keys.length, `${page.slug}: tabs block with no sections`).toBeGreaterThan(0);
+				for (const key of keys) {
+					expect(allowed.has(key), `${page.slug}: unknown tab "${key}"`).toBe(true);
+				}
+				// No duplicate sections in one widget: they would shadow each other.
+				expect(new Set(keys).size, `${page.slug}: duplicate tabs`).toBe(keys.length);
+			}
+		}
+	});
+
+	test("the renderer marks exactly one tab as selected", () => {
+		expect(buildScript).toContain("role=\"tablist\"");
+		expect(buildScript).toContain("role=\"tab\"");
+		expect(buildScript).toContain("role=\"tabpanel\"");
+		// Panels other than the first must be hidden until selected.
+		expect(buildScript).toContain("x-cloak role=\"tabpanel\"");
+	});
+
+	test("no tab shows a literal that configures options after it started", () => {
+		// A literal starts eagerly, so `.request.setRetries()` on one does not
+		// affect the request. That mistake shipped once; keep it out.
+		for (const page of pages) {
+			for (const match of page.body.matchAll(/```tabs\n([\s\S]*?)```/g)) {
+				// `split` leaves the space after `===`, so trim before the check.
+				const sections = match[1].split(/^===/m).map((s) => s.trimStart());
+				for (const section of sections) {
+					if (!/^literal/.test(section)) continue;
+					expect(
+						/setRetries|setTimeout|setRetryDelay|setRetryOn|setMaxRetryDelay|setDedupeKey/.test(section),
+						`${page.slug}: literal tab configures retry/timeout after the eager start`,
+					).toBe(false);
+				}
+			}
+		}
+	});
+});

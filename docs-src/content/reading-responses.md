@@ -22,9 +22,20 @@ yourself, this is all you need.
 
 `.json()`, `.text()` and `.blob()` parse the body **and** return the response:
 
-```ts
+```tabs
+=== class
 const [data, response] = await new Fch("https://api.example.com/users/1").json<User>();
+=== function
+const api = fch.create({ baseUrl: "https://api.example.com" });
 
+const [data, response] = await api.get<User>("/users/1");
+=== literal
+const [data, response] = await fch.get<User>`https://api.example.com/users/1`;
+```
+
+Whichever you use, the shape is the same:
+
+```ts
 data.name;        // typed as User
 response.status;  // still available
 response.headers.get("etag");

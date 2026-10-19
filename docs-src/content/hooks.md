@@ -216,25 +216,27 @@ api.after(async (response) => {
 > Rewriting bodies is fine, but it costs an extra parse and serialise per
 > response. For most apps, unwrapping in the caller is cheaper and clearer.
 
-### Log slow requests
+### Time a request
 
-There is no built-in timing hook, because a `before`/`after` pair is a few
-lines. Tag the instance in `before`, read it back in `after`:
+`after()` receives only the `Response`, not the request, so a hook cannot pair a
+start time with an end time on its own. Measure around the call:
 
 ```ts
-const started = new WeakMap<Fch, number>();
+async function timed<T>(label: string, run: () => Promise<T>): Promise<T> {
+	const start = performance.now();
+	try {
+		return await run();
+	} finally {
+		console.log(label, (performance.now() - start).toFixed(0) + "ms");
+	}
+}
 
-api.before((req) => {
-	started.set(req, performance.now());
-});
-
-api.after((response) => {
-	const ms = performance.now() - (started.get(api.request("")) ?? 0);
-	console.log(response.url, response.status, ms.toFixed(0) + "ms");
-	return response;
-});
+await timed("orders", () => api.get("/orders"));
 ```
 
-The `WeakMap` is keyed by the instance so concurrent requests cannot overwrite
-each other's start time. For most cases, `debug: true` already logs each
-attempt and each retry.
+There is no per-instance timing hook: `before()` sees the request and `after()`
+sees the response, so neither can pair the two on its own. Wrap the call, as
+above, when you need the number.
+
+For most cases, `debug: true` already logs each attempt and each retry — enough
+to spot a slow endpoint.

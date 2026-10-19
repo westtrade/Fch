@@ -6,10 +6,16 @@ right encoding based on what you hand it.
 
 ## Methods
 
-```ts
-const req = new Fch("https://api.example.com/houses")
-	.setMethod("POST")
+```tabs
+=== class
+const req = new Fch("https://api.example.com/houses", { method: "POST" })
 	.setJsonBody({ name: "Cottage" });
+=== function
+const api = fch.create({ baseUrl: "https://api.example.com" });
+
+api.post("/houses", { name: "Cottage" }); // object -> JSON
+=== literal
+fch.post({ name: "Cottage" })`https://api.example.com/houses`;
 ```
 
 Methods are validated and upper-cased:

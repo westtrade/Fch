@@ -5,7 +5,16 @@ stalled socket can be never. `Fch` gives you one, per attempt.
 
 ## The short version
 
-```ts
+```tabs
+=== class
+const [data] = await new Fch("https://api.example.com/slow", { timeout: 5000 }).json();
+=== function
+const api = fch.create({ baseUrl: "https://api.example.com", timeout: 5000 });
+
+const [data] = await api.get("/slow");
+=== literal
+// a literal starts immediately with the default timeout (30 s); to change it,
+// build from the class or pass it to a client
 const [data] = await new Fch("https://api.example.com/slow", { timeout: 5000 }).json();
 ```
 
@@ -14,7 +23,7 @@ a `DOMException` named `TimeoutError`:
 
 ```ts
 try {
-	await new Fch(url, { timeout: 5000 }).send();
+	await new Fch("https://api.example.com/slow", { timeout: 5000 }).send();
 } catch (error) {
 	if (error instanceof DOMException && error.name === "TimeoutError") {
 		// the attempt timed out

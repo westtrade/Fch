@@ -6,13 +6,24 @@ responses can even disagree if they straddle a write.
 
 `Fch` can collapse concurrent identical requests into one:
 
-```ts
+```tabs
+=== class
 const req = new Fch("https://api.example.com/profile", { dedupe: true });
 
 const [a, b] = await Promise.all([req.json(), req.json()]);
+=== function
+const api = fch.create({ baseUrl: "https://api.example.com", dedupe: true });
 
-// One request on the wire. Both callers get their own readable response.
+const [a, b] = await Promise.all([api.get("/profile"), api.get("/profile")]);
+=== literal
+// `dedupe` must be on; the literal entry has no options, so build from the class
+const req = new Fch("https://api.example.com/profile", { dedupe: true });
+
+const [a, b] = await Promise.all([req.json(), req.json()]);
 ```
+
+Whichever spelling, one request goes out on the wire and both callers get their
+own readable response.
 
 That is the whole feature. The rest of this page is the rules it follows.
 
@@ -41,11 +52,11 @@ To dedupe a write, give it an identity:
 
 ```ts
 const req = new Fch("https://api.example.com/orders", {
+	method: "POST",
 	dedupe: true,
 	dedupeKey: "checkout-42",   // or a factory: () => crypto.randomUUID()
-}).setMethod("POST");
+}).setJsonBody(order);
 
-req.setJsonBody(order);
 req.json();  // starts
 req.json();  // joins — same key, same request
 ```
@@ -63,9 +74,11 @@ For mutating methods, the dedupe key is sent as an `Idempotency-Key` header, so
 your server can deduplicate too:
 
 ```ts
-await new Fch("https://api.example.com/payments", { dedupe: true })
-	.setMethod("POST")
-	.setDedupeKey(() => crypto.randomUUID())
+await new Fch("https://api.example.com/payments", {
+	dedupe: true,
+	dedupeKey: () => crypto.randomUUID(),
+	method: "POST",
+})
 	.setJsonBody(payment)
 	.send();
 
@@ -219,21 +232,24 @@ await Promise.all([api.get("/me"), api.get("/me")]);
 ### Writes with server-side idempotency
 
 ```ts
-const [order] = await new Fch("https://api.example.com/orders", { dedupe: true })
-	.setMethod("POST")
-	.setDedupeKey(() => crypto.randomUUID())
-	.setJsonBody(order)
-	.json<Order>();
+const api = fch.create({
+	baseUrl: "https://api.example.com",
+	dedupe: true,
+	dedupeKey: () => crypto.randomUUID(),
+});
+
+const [created] = await api.post<Order>("/orders", order);
 ```
 
 ### Retry-safe and dedupe-safe together
 
 ```ts
 new Fch(url, {
+	method: "POST",
 	dedupe: true,
 	dedupeKey: "import-2024-06",
 	retries: 3,
 	retryDelay: 500,
 	retryOn: (res) => !res || res.status >= 500,
-}).setMethod("POST").setJsonBody(batch);
+}).setJsonBody(batch);
 ```
