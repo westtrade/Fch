@@ -140,11 +140,19 @@ Options passed to `create()` apply to every call; per-call options override
 them. Shortcut calls (`api.get`, `api.post`, …) start their request immediately,
 so they also work in fire-and-forget handlers without `await`.
 
-`api.request("/houses")` gives you a builder with the same defaults when you
-need to configure one call further:
+`api.request(url, options?)` gives you a builder with the same defaults, and
+accepts per-call options as its second argument — so a one-off override does not
+need a chain:
 
 ```ts
-const [house] = await api.request("/houses/1").setRetries(5).json<House>();
+const [house] = await api.request("/houses/1", { retries: 5 }).json<House>();
+```
+
+Use the setters only for what options cannot express, such as an interceptor or
+a dedupe key factory:
+
+```ts
+await api.request("/houses").setDedupeKey(() => crypto.randomUUID()).send();
 ```
 
 ## CommonJS

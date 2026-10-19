@@ -123,19 +123,35 @@ await api.get("/me", { headers: { "X-Trace-Id": "abc" } });
 
 ## Getting a builder back
 
-When one call needs more configuration than options allow, ask for the builder:
+`api.request(url, options?)` returns a builder with the same defaults. Pass the
+options as the second argument rather than chaining, so a one-off override stays
+one line:
+
+```ts
+const [house] = await api.request("/houses/1", { retries: 5 }).json<House>();
+```
+
+Setters are for what options cannot express — an interceptor, a dedupe key
+factory, a `DELETE` body, or `poll()`:
 
 ```ts
 const req = api.request("/houses")
-	.setRetries(5)
 	.setDedupeKey(() => crypto.randomUUID())
+	.after(httpError)
 	.setJsonBody(house);
 
 await req.send();
 ```
 
-`api.request()` applies the same defaults, including `baseUrl`, and is the right
-tool for `DELETE` bodies, interceptors, or `poll()`.
+`api.request()` applies the same defaults, including `baseUrl`. Per-call options
+merge over them, and headers merge rather than replace:
+
+```ts
+const api = fch.create({ baseUrl: "https://api.example.com", timeout: 5000 });
+
+api.request("/slow", { timeout: 60_000 });          // this call only
+api.request("/x", { headers: { "X-Trace": "1" } }); // shared auth header survives
+```
 
 ## Base URL handling
 

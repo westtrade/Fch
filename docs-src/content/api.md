@@ -32,6 +32,7 @@ const api = fch.create({ baseUrl: "https://api.example.com", timeout: 5000 });
 api.get("/users");              // starts immediately
 api.post("/users", body);       // starts immediately
 api.request("/users");          // returns a builder
+api.request("/users", { retries: 5 }); // builder with per-call options
 api.defaults;                   // the shared defaults
 ```
 

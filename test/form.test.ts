@@ -403,3 +403,54 @@ describe("form bodies are read once per submit", () => {
 		expect(constructed).toBe(1);
 	});
 });
+
+// Documented in getting-started.md and shortcuts.md: a one-off override is the
+// second argument of api.request(), not a chain of setters.
+describe("api.request(url, options)", () => {
+	test("per-call options override the client defaults", async () => {
+		const { create } = await import("../src/Fch");
+		const api = create({ baseUrl: "https://app.example.com", timeout: 5000, retries: 0 });
+
+		const req = api.request("/houses/1", { retries: 5 });
+
+		expect(req.retries).toBe(5);
+		// Untouched defaults still apply.
+		expect(req.timeout).toBe(5000);
+		expect(req.toString()).toBe("https://app.example.com/houses/1");
+	});
+
+	test("is a builder, so .json() still resolves the tuple", async () => {
+		const { create } = await import("../src/Fch");
+		const api = create({ baseUrl: "https://app.example.com" });
+
+		const [house, response] = await api.request("/houses/1", { retries: 5 }).json<{ ok: boolean }>();
+
+		expect(house).toEqual({ ok: true });
+		expect(response.status).toBe(200);
+		expect(sent.at(-1)!.url).toBe("https://app.example.com/houses/1");
+	});
+
+	test("headers merge with the client's instead of replacing them", async () => {
+		const { create } = await import("../src/Fch");
+		const api = create({
+			baseUrl: "https://app.example.com",
+			headers: { Authorization: "Bearer t" },
+		});
+
+		// Inspect the builder: this file's fetch stub records only Content-Type.
+		const req = api.request("/x", { headers: { "X-Trace": "1" } });
+		expect(req.getHeader("Authorization")).toBe("Bearer t");
+		expect(req.getHeader("X-Trace")).toBe("1");
+	});
+
+	test("a per-call baseUrl retargets only that request", async () => {
+		const { create } = await import("../src/Fch");
+		const api = create({ baseUrl: "https://app.example.com" });
+
+		await api.request("/x", { baseUrl: "https://other.example" }).send();
+		expect(sent.at(-1)!.url).toBe("https://other.example/x");
+
+		await api.request("/x").send();
+		expect(sent.at(-1)!.url).toBe("https://app.example.com/x");
+	});
+});
