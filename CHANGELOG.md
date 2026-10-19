@@ -1,3 +1,10 @@
+## [1.7.2](https://github.com/westtrade/Fch/compare/v1.7.1...v1.7.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* **site:** pointer cursor on the tab bar itself ([47575b6](https://github.com/westtrade/Fch/commit/47575b6b1b88be77a437823df0f0b3bcbff2ab34))
+
 ## [1.7.1](https://github.com/westtrade/Fch/compare/v1.7.0...v1.7.1) (2026-10-19)
 
 
