@@ -136,7 +136,8 @@ runtime can set the right one.
 
 ### `setFormData(formData)`
 
-Accepts `FormData`, a `<form>` element, or a submit `Event`. Adopts the form's
+Accepts `FormData`, a `<form>` element, a submit `Event`, or a **CSS selector**
+for a form (`"#checkout"`). A string is a selector here, never a body. Adopts the form's
 method when it is not `GET`; a `GET`/`HEAD` request serialises the fields into
 the query string instead of sending a body. Clears `Content-Type`.
 
@@ -144,6 +145,12 @@ the query string instead of sending a body. Clears `Content-Type`.
 
 Creates the `FormData` on first call, appends, sets the method to `POST` (unless
 already `PUT`), clears `Content-Type`.
+
+### `setFormFrom(selector)`
+
+Explicit alias for `setFormData(selector)`. Throws
+`setFormData() found no <form> matching "…"` when nothing matches, or when the
+match is not a form.
 
 ### `appendFormToQuery(data)`
 

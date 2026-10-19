@@ -454,3 +454,83 @@ describe("api.request(url, options)", () => {
 		expect(sent.at(-1)!.url).toBe("https://app.example.com/x");
 	});
 });
+
+// setFormData accepts a CSS selector, so a form can be referenced without
+// holding the element. A bare string is also a valid body, so the selector
+// handling must NOT leak into setBody() or toFormData().
+describe("setFormData(selector)", () => {
+	let Fch: typeof import("../src/Fch").Fch;
+
+	beforeEach(async () => {
+		Fch = (await import("../src/Fch")).Fch;
+	});
+
+	test("resolves a selector to a form and serialises it", async () => {
+		document.body.innerHTML = '<form id="postForm" method="post"><input name="title" value="x"></form>';
+
+		const req = new Fch("https://app.example.com/houses").setFormData("#postForm");
+
+		expect(req.method).toBe("POST");
+		const body = req.fetchOptions.body as FormData;
+		expect(body).toBeInstanceOf(window.FormData);
+		expect([...body.keys()]).toContain("title");
+	});
+
+	test("accepts an attribute selector", async () => {
+		// No `method` means GET in HTML, so declare POST to get a body.
+		document.body.innerHTML =
+			'<form name="named" method="post"><input name="city" value="Berlin"></form>';
+
+		const req = new Fch("https://app.example.com/x").setFormData('form[name="named"]');
+		expect([...(req.fetchOptions.body as FormData).keys()]).toEqual(["city"]);
+	});
+
+	test("a GET form serialises into the query string", async () => {
+		document.body.innerHTML = '<form id="getForm" method="get"><input name="q" value="cottage"></form>';
+
+		const req = new Fch("https://app.example.com/search").setFormData("#getForm");
+
+		expect(req.toString()).toBe("https://app.example.com/search?q=cottage");
+		expect(req.fetchOptions.body).toBeFalsy();
+	});
+
+	test("setFormFrom() is the same thing", async () => {
+		document.body.innerHTML = '<form id="postForm" method="post"><input name="title" value="x"></form>';
+
+		const req = new Fch("https://app.example.com/houses").setFormFrom("#postForm");
+		expect(req.method).toBe("POST");
+		expect(req.fetchOptions.body).toBeInstanceOf(window.FormData);
+	});
+
+	test("a missing selector names the selector in the error", async () => {
+		expect(() => new Fch("https://app.example.com/x").setFormData("#nope")).toThrow(
+			/found no <form> matching "#nope"/,
+		);
+	});
+
+	test("a selector matching a non-form is rejected", async () => {
+		document.body.innerHTML = '<div id="not-form"></div>';
+
+		expect(() => new Fch("https://app.example.com/x").setFormData("#not-form")).toThrow(
+			/found no <form> matching/,
+		);
+	});
+
+	test("an invalid selector does not escape as a SyntaxError", async () => {
+		expect(() => new Fch("https://app.example.com/x").setFormData("###")).toThrow(
+			/found no <form> matching/,
+		);
+	});
+
+	test("string bodies are still bodies, not selectors", async () => {
+		document.body.innerHTML = '<form id="postForm"><input name="a" value="1"></form>';
+
+		// The regression this guards: teaching toFormData about strings would
+		// make `setBody("#checkout")` silently become a form submission.
+		const req = new Fch("https://app.example.com/x").setBody("hello #world");
+		expect(req.fetchOptions.body).toBe("hello #world");
+
+		const looksLikeSelector = new Fch("https://app.example.com/x").setBody("#postForm");
+		expect(looksLikeSelector.fetchOptions.body).toBe("#postForm");
+	});
+});

@@ -24,6 +24,7 @@ export const fchWithCreate = mod.fchWithCreate
 export const create = mod.create
 export const toFormData = mod.toFormData
 export const resolveForm = mod.resolveForm
+export const resolveFormSelector = mod.resolveFormSelector
 export const toCall = mod.toCall
 
 export default mod.fch

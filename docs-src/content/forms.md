@@ -38,6 +38,44 @@ req.setBody(form);         // setBody understands forms as well
 await req.send();
 ```
 
+### By selector
+
+When the form is somewhere else in the document, pass a CSS selector instead of
+the element:
+
+```tabs
+=== class
+const [order] = await new Fch("https://api.example.com/checkout")
+	.setFormData("#checkout")
+	.json<Order>();
+=== function
+const [order] = await api.request("/checkout").setFormData("#checkout").json<Order>();
+=== literal
+await fch`https://api.example.com/checkout`.request
+	.setFormData("#checkout")
+	.json();
+```
+
+`setFormFrom(selector)` is an explicit alias, for when you want the intent to be
+obvious in a chain:
+
+```ts
+await api.request("/checkout").setFormFrom("#checkout").json();
+```
+
+Any selector works — `"#checkout"`, `'form[name="house"]'`, `".js-signup"`. The
+matched element must be a `<form>`; anything else is rejected. The error names
+the selector:
+
+```text
+TypeError: setFormData() found no <form> matching "#checkout".
+```
+
+> **Only in `setFormData`.** A string is a perfectly good request body, so
+> `setBody("hello #world")` sends that text — it is never treated as a selector.
+> That is why the selector lives on `setFormData()` / `setFormFrom()` and not in
+> `setBody()`.
+
 ## What the conversion does
 
 `Fch` calls the platform's `new FormData(form, submitter)` — it does **not**

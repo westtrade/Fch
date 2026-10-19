@@ -225,6 +225,33 @@ export function toFormData(value: unknown): FormData | null {
 }
 
 /** Extract the `<form>` from a form element or from an event that targets one. */
+/**
+ * Resolve a CSS selector to a form, in the document where it is looked up.
+ *
+ * Only `setFormData()` and the shortcut API use this. A bare string is also a
+ * valid request body, so `toFormData()` deliberately does **not** treat strings
+ * as selectors — `setBody("hello #world")` must stay text.
+ *
+ * @param selector - A selector such as `"#checkout"` or `"form[name=house]"`.
+ * @returns The matched form, or `null` when there is no DOM or no match.
+ */
+export function resolveFormSelector(selector: string): FormLike | null {
+	if (typeof document === 'undefined' || typeof document.querySelector !== 'function') {
+		return null;
+	}
+
+	let found: unknown;
+	try {
+		found = document.querySelector(selector);
+	} catch {
+		// An invalid selector is not a form: fall through and let the caller
+		// report what it expected, rather than throwing "not a valid selector".
+		return null;
+	}
+
+	return isFormElement(found) ? found : null;
+}
+
 export function resolveForm(value: unknown): FormLike | null {
 	if (isFormElement(value)) return value;
 
@@ -736,15 +763,41 @@ export class Fch extends URL {
 	 * @example
 	 * form.onsubmit = (e) => { e.preventDefault(); api.setFormData(e).send(); };
 	 */
-	setFormData(formData: FormData | FormLike): this {
-		const data = toFormData(formData);
+	/**
+	 * Set the form body from a CSS selector, for when you do not have the element
+	 * at hand:
+	 *
+	 * ```ts
+	 * await api.request("/checkout").setFormFrom("#checkout").json();
+	 * ```
+	 *
+	 * Same behaviour as {@link Fch.setFormData} — the form's method is honoured,
+	 * the submit button is not (there is no event), and `Content-Type` is left to
+	 * the runtime. Throws when nothing matches.
+	 *
+	 * @param selector - CSS selector for a `<form>` in the current document.
+	 */
+	setFormFrom(selector: string): this {
+		return this.setFormData(selector);
+	}
+
+	setFormData(formData: FormData | FormLike | string): this {
+		// A string is a CSS selector here, never a body: `setBody()` is the door
+		// for string payloads.
+		const resolved =
+			typeof formData === 'string' ? resolveFormSelector(formData) : formData;
+
+		const data = toFormData(resolved);
 		if (!data) {
 			throw new TypeError(
-				'setFormData() expects FormData, a <form> element, or a submit event.'
+				typeof formData === 'string'
+					? `setFormData() found no <form> matching "${formData}".`
+					: 'setFormData() expects FormData, a <form> element, a submit event, ' +
+							'or a CSS selector for a form.'
 			);
 		}
 
-		const form = resolveForm(formData);
+		const form = resolveForm(resolved);
 		const declared = form?.method?.toLowerCase();
 
 		// Adopt the form's own method when it declares something other than GET.
@@ -795,10 +848,14 @@ export class Fch extends URL {
 	 */
 	setBody(body: FchBody, contentType?: string): this {
 		// A form/event is not a valid fetch body — convert it, and take the method
-		// from the form when it declares one.
-		const asFormData = toFormData(body);
-		if (asFormData) {
-			return this.setFormData(asFormData);
+		// from the form when it declares one. A plain string is left alone: it is
+		// a valid body, so it is never treated as a selector here. Use
+		// `setFormData("#id")` or `setFormFrom(selector)` for that.
+		if (typeof body !== 'string') {
+			const asFormData = toFormData(body);
+			if (asFormData) {
+				return this.setFormData(asFormData);
+			}
 		}
 
 		this.formData = null;
