@@ -1,3 +1,10 @@
+## [1.2.4](https://github.com/westtrade/Fch/compare/v1.2.3...v1.2.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* honour setFetchOptions signal, clone eager responses, clean poll abort ([7030aa7](https://github.com/westtrade/Fch/commit/7030aa70336a0e227988be5396f333a9959a9768))
+
 ## [1.2.3](https://github.com/westtrade/Fch/compare/v1.2.2...v1.2.3) (2026-10-18)
 
 
