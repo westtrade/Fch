@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/westtrade/Fch/compare/v1.7.0...v1.7.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **site:** pointer cursor on every control and a tinted tab header ([0e58928](https://github.com/westtrade/Fch/commit/0e5892829f52378c7cd4de2572011124c7abf9e2))
+
 # [1.7.0](https://github.com/westtrade/Fch/compare/v1.6.0...v1.7.0) (2026-10-19)
 
 
