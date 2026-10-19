@@ -258,10 +258,14 @@ describe("tab header legibility", () => {
 		expect(bar).not.toMatch(/bg-slate-\d+\/\d+/);
 	});
 
-	test("the active tab is distinguishable by surface, not colour alone", () => {
-		// Active: filled indigo-600 + white text. Inactive: muted indigo on the bar.
-		expect(buildScript).toContain("bg-indigo-600 text-white");
-		expect(buildScript).toMatch(/text-indigo-2\d\d/);
+	test("the active tab is marked by text colour and an underline, not a fill", () => {
+		// Active: white text + white 2px underline, no background.
+		expect(buildScript).toContain("border-white text-white");
+		expect(buildScript).toContain("border-transparent text-indigo-200");
+		// No filled surface on tabs at all.
+		expect(buildScript).not.toMatch(/\bbg-indigo-600\b/);
+		// The underline is the marker, so it must be a border, not a pseudo-element.
+		expect(buildScript).toContain("border-b-2");
 	});
 
 	test("every interactive element signals clickability", () => {
@@ -284,8 +288,10 @@ describe("tab header legibility", () => {
 		// A slate bar on slate code looked like one surface; the header is tinted.
 		const bar = buildScript.match(/<div class="[^"]*"[^>]*role="tablist"/)?.[0] ?? "";
 		expect(bar).toMatch(/bg-indigo-\d+/);
-		// And the selected tab is a filled accent, not a subtle shade.
-		expect(buildScript).toContain("bg-indigo-600 text-white");
+		// The bar has no horizontal padding: tabs sit flush with its edge.
+		expect(bar).not.toMatch(/\bpx-[\d.]+/);
+		// And the selected tab is marked by text + underline, not a fill.
+		expect(buildScript).toContain("border-white text-white");
 	});
 
 	test("inactive label colour meets WCAG AA on the bar", () => {

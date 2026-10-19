@@ -131,7 +131,7 @@ function renderTabs(text) {
 	const code = (section) => section.lines.join('\n').replace(/^\n+|\n+$/g, '')
 	const buttons = sections
 		.map(
-			(section, i) => `<button type="button" role="tab" x-on:click="tab = '${section.key}'" :aria-selected="tab === '${section.key}'" :class="tab === '${section.key}' ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-200/80 hover:bg-indigo-900/60 hover:text-white'" class="cursor-pointer rounded-t-md px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider transition"${i === 0 ? ' id="tab-first"' : ''}>${escapeHtml(TAB_LABELS[section.key] || section.key)}</button>`
+			(section, i) => `<button type="button" role="tab" x-on:click="tab = '${section.key}'" :aria-selected="tab === '${section.key}'" :class="tab === '${section.key}' ? 'border-white text-white' : 'border-transparent text-indigo-200/70 hover:text-white'" class="cursor-pointer border-b-2 px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider transition-colors"${i === 0 ? ' id="tab-first"' : ''}>${escapeHtml(TAB_LABELS[section.key] || section.key)}</button>`
 		)
 		.join('')
 
@@ -145,7 +145,7 @@ function renderTabs(text) {
 		.join('\n')
 
 	return `<div class="my-5" x-data="{ tab: '${sections[0].key}', copied: false }">
-<div class="flex cursor-pointer gap-1 rounded-t-xl border border-b-0 border-indigo-900 bg-indigo-950 px-2 pt-1" role="tablist">${buttons}</div>
+<div class="flex cursor-pointer rounded-t-xl border border-b-0 border-indigo-900 bg-indigo-950 pt-0.5" role="tablist">${buttons}</div>
 ${panels}
 </div>`
 }
