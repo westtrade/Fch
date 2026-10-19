@@ -83,8 +83,10 @@ describe("documentation site", () => {
 		const gzip = gzipSync(readFileSync(bundle), { level: 9 }).length / 1024;
 
 		const claimed = Number(page.match(/\*\*~([\d.]+) kB\*\*/)![1]);
+		// The claim is rounded to a whole kB, so allow half a kB of rounding plus
+		// 10% for measurement differences; a doubling still fails.
 		expect(Math.abs(gzip - claimed), `claimed ${claimed} kB, actual ${gzip.toFixed(2)} kB`)
-			.toBeLessThan(claimed * 0.1);
+			.toBeLessThan(Math.max(0.5, claimed * 0.1));
 
 		// The dependency column must agree with package.json.
 		const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));

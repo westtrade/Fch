@@ -46,6 +46,8 @@ api.defaults;                   // the shared defaults
 | `retryDelay` | `number` | `1000` | Base delay in ms for exponential backoff |
 | `maxRetryDelay` | `number` | `30000` | Cap on the delay before jitter |
 | `timeout` | `number` | `30000` | Per-attempt timeout in ms; `0` disables |
+| `delayMs` | `number \| false` | `500` | UI timer: report `delayed` after N ms (never aborts) |
+| `timeoutMs` | `number \| false` | `8000` | UI timer: report `timeout` after N ms (never aborts) |
 | `retryOn` | `(response, error, attempt) => boolean` | network errors only | Retry policy |
 | `dedupe` | `boolean` | `false` | Collapse concurrent identical requests |
 | `dedupeKey` | `string \| () => string` | — | Identity for mutating requests; also sent as `Idempotency-Key` |
@@ -210,6 +212,20 @@ never retried.
 | `getLogger()` | Logger proxy that respects the instance's gating |
 | `enableLogging()` | `debug: true` |
 | `disableLogging()` | `debug: false` |
+
+## UI timers
+
+Observational phases for loading indicators: `idle → submitting → delayed → timeout`.
+
+| Member | Result |
+| --- | --- |
+| `timer` | current phase |
+| `loading` | `true` in submitting, delayed and timeout |
+| `delayed` | `true` once `delayMs` elapsed |
+| `timedOut` | `true` once `timeoutMs` elapsed |
+| `timerInfo` | `{ state, loading, delayed, timedOut, elapsed }` |
+| `onTimer(fn)` | subscribe to phase changes; returns an unsubscribe |
+| `setTimers(delayMs, timeoutMs?)` | configure both; throws if `delayMs > timeoutMs` |
 
 ## Lifecycle
 

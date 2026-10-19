@@ -51,7 +51,7 @@ describe("nanostores plugin", () => {
 		for (const member of ["get", "listen", "subscribe", "set", "setKey"]) {
 			expect(typeof (req as never as Record<string, unknown>)[member], member).toBe("function");
 		}
-		expect(req.get()).toEqual({ loading: false });
+		expect(req.get()).toMatchObject({ loading: false, timer: "idle", delayed: false, timedOut: false });
 	});
 
 	test("is idempotent and reports its name", () => {
@@ -201,5 +201,119 @@ describe("nanostores plugin", () => {
 
 	test("rejects a store that is neither a map nor an atom", () => {
 		expect(() => nanostores({ store: {} as never })).toThrow(/setKey|set\(\)/);
+	});
+});
+
+describe("UI timers (Superforms-style)", () => {
+	const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+	test("plain Fch exposes timers as getters", () => {
+		const req = new Fch("https://api.example.com/x", { delayMs: 10, timeoutMs: 20 });
+
+		expect(req.timer).toBe("idle");
+		expect(req.loading).toBe(false);
+		expect(req.delayed).toBe(false);
+		expect(req.timedOut).toBe(false);
+	});
+
+	test("walks idle -> submitting -> delayed -> timeout -> idle", async () => {
+		globalThis.fetch = (async () => {
+			await wait(60);
+			return new Response("{}");
+		}) as unknown as typeof fetch;
+
+		const req = new Fch("https://api.example.com/x", { delayMs: 10, timeoutMs: 30 });
+		const seen: string[] = [];
+		req.onTimer((state) => seen.push(state));
+
+		const pending = req.send();
+		await wait(20);
+		expect(req.timer).toBe("delayed");
+		expect(req.delayed).toBe(true);
+
+		await wait(20);
+		expect(req.timer).toBe("timeout");
+		expect(req.timedOut).toBe(true);
+
+		await pending;
+		expect(req.timer).toBe("idle");
+		expect(seen).toEqual(["submitting", "delayed", "timeout", "idle"]);
+	});
+
+	test("a fast response never reports delayed", async () => {
+		const req = new Fch("https://api.example.com/x", { delayMs: 50, timeoutMs: 100 });
+		const seen: string[] = [];
+		req.onTimer((state) => seen.push(state));
+
+		await req.send();
+
+		expect(seen).toEqual(["submitting", "idle"]);
+	});
+
+	test("timers are observational: they never abort the request", async () => {
+		globalThis.fetch = (async () => {
+			await wait(60);
+			return new Response('{"ok":true}', { headers: { "Content-Type": "application/json" } });
+		}) as unknown as typeof fetch;
+
+		// timeoutMs is short, but `timeout` is what aborts; the request completes.
+		const req = new Fch("https://api.example.com/x", { delayMs: 5, timeoutMs: 10 });
+		const [body] = await req.json<{ ok: boolean }>();
+
+		expect(body.ok).toBe(true);
+	});
+
+	test("disabled timers keep the request in submitting", async () => {
+		globalThis.fetch = (async () => {
+			await wait(30);
+			return new Response("{}");
+		}) as unknown as typeof fetch;
+
+		const req = new Fch("https://api.example.com/x", { delayMs: false, timeoutMs: false });
+		const pending = req.send();
+		await wait(15);
+		expect(req.timer).toBe("submitting");
+		await pending;
+		expect(req.timer).toBe("idle");
+	});
+
+	test("rejects delayMs greater than timeoutMs", () => {
+		expect(() => new Fch("https://api.example.com/x").setTimers(100, 50)).toThrow(
+			/delayMs \(100\) must be less than or equal to timeoutMs \(50\)/,
+		);
+		expect(() => new Fch("https://api.example.com/x").setTimers(-1)).toThrow(/Invalid delayMs/);
+	});
+
+	test("the store exposes timer state and settles back to idle", async () => {
+		globalThis.fetch = (async () => {
+			await wait(40);
+			return new Response(JSON.stringify({ ok: 1 }), { headers: { "Content-Type": "application/json" } });
+		}) as unknown as typeof fetch;
+
+		// timeoutMs must exceed the response time, or `timeout` is reached first.
+		const req = new Fch("https://api.example.com/x", { delayMs: 10, timeoutMs: 200 }).use(nanostores());
+		const timers: string[] = [];
+		req.listen((state) => timers.push(state.timer));
+
+		const pending = req.json();
+		await wait(20);
+		expect(req.get().timer).toBe("delayed");
+		expect(req.get().delayed).toBe(true);
+
+		await pending;
+		expect(req.get().timer).toBe("idle");
+		expect(req.get().data).toEqual({ ok: 1 });
+		// No duplicate phases: exactly one report per transition.
+		expect(timers).toEqual(["submitting", "delayed", "idle"]);
+	});
+
+	test("onTimer unsubscribe stops notifications", async () => {
+		const req = new Fch("https://api.example.com/x", { delayMs: 5, timeoutMs: 20 });
+		let count = 0;
+		const off = req.onTimer(() => count++);
+		off();
+
+		await req.send();
+		expect(count).toBe(0);
 	});
 });

@@ -384,6 +384,10 @@ describe("B14 — retry backoff still honours maxRetryDelay", () => {
 			timeout: 0,
 			retries: 3,
 			retryDelay: 100_000,
+			// This test captures every setTimeout to measure the backoff. The UI
+			// timers also schedule timeouts, so disable them to isolate the retry.
+			delayMs: false,
+			timeoutMs: false,
 		});
 
 		const delays: number[] = [];

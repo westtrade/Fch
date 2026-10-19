@@ -23,6 +23,9 @@ interface StoreState<T> {
 	data?: T; // the parsed body
 	error?: Error; // a normalised Error
 	response?: Response; // the raw Response, when one arrived
+	timer: "idle" | "submitting" | "delayed" | "timeout";
+	delayed: boolean; // true after delayMs
+	timedOut: boolean; // true after timeoutMs
 }
 ```
 
@@ -311,6 +314,87 @@ mounts and unmounts:
 const off = req.listen(render);
 // later
 off();
+```
+
+## Loading timers
+
+A spinner that appears instantly feels broken when the response takes 30 ms. The
+timers follow Superforms' [loading timers](https://superforms.rocks/concepts/timers):
+`delayed` is what you render, not `loading`.
+
+```
+idle -> submitting -> delayed -> timeout
+        0 ms         delayMs   timeoutMs
+```
+
+```ts
+const req = new Fch("https://api.example.com/houses/1", {
+	delayMs: 500, // show a spinner after 500 ms
+	timeoutMs: 8000, // after 8 s, say "still working"
+}).use(nanostores());
+```
+
+Without the plugin these are plain getters, read at render time:
+
+```ts
+const req = new Fch(url, { delayMs: 500, timeoutMs: 8000 });
+const pending = req.send();
+
+req.timer; // "submitting"
+req.loading; // true
+req.delayed; // false until 500 ms
+req.timedOut; // false until 8 s
+
+await pending;
+req.timer; // "idle"
+```
+
+With the plugin they are store keys, so a template subscribes instead of
+polling:
+
+```tsx
+const { loading, delayed, timedOut, data, error } = useStore(req);
+
+{delayed && !timedOut && <Spinner />}
+{timedOut && <p>Still working…</p>}
+{data && <p>House #{data.id}</p>}
+```
+
+The phases are cumulative — `delayed` stays true when `timeout` is reached, and
+`loading` is true in all three active phases. Nothing is mutually exclusive, so
+tests and templates do not have to special-case the later phases.
+
+### They never abort anything
+
+`delayMs` and `timeoutMs` are **observational**. They do not delay, cancel or
+retry a request; only `timeout` does that:
+
+| Option | Effect |
+| --- | --- |
+| `timeout` | aborts the attempt (with retries, per attempt) |
+| `timeoutMs` | only changes the reported phase |
+
+That separation is deliberate: a "slow" indicator should never be able to break
+a request that was about to succeed.
+
+### Rules
+
+- `delayMs` must be `<= timeoutMs`, or construction throws — the phases would
+  otherwise be unreachable in order.
+- Pass `false` for either to disable that phase. With both disabled the request
+  stays in `submitting`.
+- A fast response never reports `delayed`; it goes `submitting → idle`.
+- Timers reset on settle, so a reused instance starts clean on the next call.
+
+### Listening without the plugin
+
+```ts
+const off = req.onTimer((state) => {
+	// "submitting" | "delayed" | "timeout" | "idle"
+	spinner.hidden = state !== "delayed";
+});
+
+off(); // unsubscribe
 ```
 
 ## Mirroring into your own store

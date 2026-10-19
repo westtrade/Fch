@@ -8,7 +8,7 @@ including the places where they are the better choice.
 
 | | `fetch` | **Fch** | axios | ky | ofetch | wretch |
 | --- | --- | --- | --- | --- | --- | --- |
-| Bundle (gzipped) | 0 | **~5.5 kB** | ~19 kB | ~10.7 kB | ~3.9 kB | ~1.8 kB |
+| Bundle (gzipped) | 0 | **~6 kB** | ~19 kB | ~10.7 kB | ~3.9 kB | ~1.8 kB |
 | Dependencies | 0 | **0** | 4 | 0 | 3 | 0 |
 | Request target is a real `URL` | ✗ | **✓ `instanceof URL`** | ✗ | ✗ | ✗ | ✗ |
 | Timeout | ✗ | ✓ | ✓ | ✓ | ✓ | ✓ (addon) |

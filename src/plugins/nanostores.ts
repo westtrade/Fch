@@ -20,7 +20,7 @@
  *
  * No dependency on nanostores: the instance only implements its contract.
  */
-import type { Plugin, PluginApi } from '../Fch';
+import type { Plugin, PluginApi, TimerState } from '../Fch';
 
 /** Per-request state exposed by the store. */
 export interface StoreState<T = unknown> {
@@ -32,6 +32,12 @@ export interface StoreState<T = unknown> {
 	error?: Error;
 	/** The raw `Response`, when one arrived. */
 	response?: Response;
+	/** UI timer phase: idle / submitting / delayed / timeout. */
+	timer: TimerState;
+	/** `true` once `delayMs` elapsed — use this to show a spinner. */
+	delayed: boolean;
+	/** `true` once `timeoutMs` elapsed. */
+	timedOut: boolean;
 }
 
 /** Keys that {@link StoreState} exposes to `setKey`. */
@@ -81,7 +87,7 @@ export interface NanostoresOptions<T = unknown> {
 	clearOnRequest?: boolean;
 }
 
-const INITIAL: StoreState = { loading: false };
+const INITIAL: StoreState = { loading: false, timer: 'idle', delayed: false, timedOut: false };
 
 /**
  * Turn the request into a store and run its lifecycle into it.
@@ -111,7 +117,7 @@ export function nanostores<T = unknown>(
 		// Fixed name: attaching twice must not duplicate listeners.
 		name: 'nanostores',
 
-		install({ request, onRequest, onSuccess, onError }: PluginApi): void {
+		install({ request, onSuccess, onError }: PluginApi): void {
 			let state: StoreState<T> = { ...INITIAL } as StoreState<T>;
 			const listeners = new Set<Listener<T>>();
 
@@ -134,7 +140,7 @@ export function nanostores<T = unknown>(
 			const sync = (): void => {
 				if (!mirror) return;
 				if (typeof mirror.setKey === 'function') {
-					for (const key of ['loading', 'data', 'error', 'response'] as const) {
+					for (const key of ['loading', 'data', 'error', 'response', 'timer', 'delayed', 'timedOut'] as const) {
 						mirror.setKey(key, state[key]);
 					}
 				} else {
@@ -142,10 +148,39 @@ export function nanostores<T = unknown>(
 				}
 			};
 
+			// Shallow equality, so a phase reported twice (the timer machine and
+			// onRequest both announce `submitting`) does not re-render subscribers.
+			const same = (a: StoreState<T>, b: StoreState<T>): boolean => {
+				const keys: StoreKey[] = ['loading', 'data', 'error', 'response', 'timer', 'delayed', 'timedOut'];
+				return keys.every((key) => a[key] === b[key]);
+			};
+
 			const set = (next: StoreState<T>): void => {
+				if (same(state, next)) return;
 				replace(next);
 				sync();
 			};
+
+			// Mirror the UI timers into the same store, so a template can react to
+			// `delayed` / `timedOut` exactly as with Superforms' loading timers.
+			request.onTimer((timer: TimerState) => {
+				const starting = timer === 'submitting';
+				const next: StoreState<T> = {
+					...state,
+					timer,
+					loading: timer !== 'idle',
+					delayed: timer === 'delayed' || timer === 'timeout',
+					timedOut: timer === 'timeout',
+					// A new request starts: drop the previous outcome in the same
+					// update, so subscribers see one transition, not two.
+					...(starting && {
+						data: clearOnRequest ? undefined : state.data,
+						error: undefined,
+						response: undefined,
+					}),
+				};
+				set(next);
+			});
 
 			const patch = (key: StoreKey, value: unknown): void => {
 				put(key, value);
@@ -176,22 +211,26 @@ export function nanostores<T = unknown>(
 			});
 
 			// Lifecycle: loading → data | error.
-			onRequest(() => {
-				set({
-					loading: true,
-					data: clearOnRequest ? undefined : state.data,
-					error: undefined,
-					response: undefined,
-				});
-			});
-
 			onSuccess((body, response) => {
-				set({ loading: false, data: body as T, error: undefined, response });
+				set({
+					...state,
+					loading: false,
+					timer: 'idle',
+					delayed: false,
+					timedOut: false,
+					data: body as T,
+					error: undefined,
+					response,
+				});
 			});
 
 			onError((error) => {
 				set({
+					...state,
 					loading: false,
+					timer: 'idle',
+					delayed: false,
+					timedOut: false,
 					data: clearOnRequest ? undefined : state.data,
 					error: error instanceof Error ? error : new Error(String(error)),
 					response: undefined,

@@ -44,6 +44,32 @@ export interface Plugin {
 	install(api: PluginApi): void;
 }
 
+/**
+ * UI timer phase, mirroring Superforms' loading timers:
+ *
+ * ```
+ * idle -> submitting -> delayed -> timeout
+ *         0 ms         delayMs   timeoutMs
+ * ```
+ *
+ * The phases are cumulative: `delayed` implies `submitting`, `timeout` implies
+ * both. `loading` is true in all three.
+ */
+export type TimerState = 'idle' | 'submitting' | 'delayed' | 'timeout';
+
+/** Snapshot handed to {@link Fch.onTimer} listeners. */
+export interface TimerInfo {
+	state: TimerState;
+	/** `true` for submitting, delayed and timeout. */
+	loading: boolean;
+	/** `true` once `delayMs` has elapsed before settling. */
+	delayed: boolean;
+	/** `true` once `timeoutMs` has elapsed before settling. */
+	timedOut: boolean;
+	/** Milliseconds since this execution started. */
+	elapsed: number;
+}
+
 /** Passed to {@link Plugin.install}. */
 export interface PluginApi {
 	/** The instance being extended. */
@@ -85,6 +111,18 @@ export interface PluginApi {
  */
 export interface FetchRequestOptions extends RequestInit {
 	retries?: number;
+	/**
+	 * UI delay before the request is reported as "delayed", in ms (default 500).
+	 * Purely observational: it never aborts or delays the request. Set `0` to
+	 * report `delayed` immediately. Pass `false` to disable the timer.
+	 */
+	delayMs?: number | false;
+	/**
+	 * UI budget after which the request is reported as "timeout", in ms
+	 * (default 8000). Also observational — use `timeout` to actually abort.
+	 * `delayMs` should be <= `timeoutMs`. Pass `false` to disable.
+	 */
+	timeoutMs?: number | false;
 	retryDelay?: number;
 	/** @deprecated Use `retryDelay`. */
 	retryTimeout?: number;
@@ -358,7 +396,17 @@ export class Fch extends URL {
 	 * request starts — NOT when a concurrent request happens to succeed, which
 	 * would erase the timeout of the request that is still in flight.
 	 */
-	private timedOut = false;
+	private requestTimedOut = false;
+
+	/** UI timers (see `delayMs` / `timeoutMs`). Observational only. */
+	private delayMs: number | false = 500;
+	private timeoutMs: number | false = 8000;
+
+	/** Current phase of the UI timer state machine. */
+	private timerState: TimerState = 'idle';
+
+	/** Timer listeners (`onTimer`). */
+	private timerListeners: ((state: TimerState) => void)[] = [];
 
 	private retryOn?: (
 		response: Response | null,
@@ -433,6 +481,8 @@ export class Fch extends URL {
 			idempotencyKey,
 			retryOn,
 			headers,
+			delayMs = 500,
+			timeoutMs = 8000,
 			...options
 		}: FetchRequestOptions = {}
 	) {
@@ -469,6 +519,9 @@ export class Fch extends URL {
 		this.dedupe = dedupe;
 		this.dedupeKey = dedupeKey ?? idempotencyKey ?? null;
 		this.retryOn = retryOn;
+		// UI timers: observational only, so they are validated separately from
+		// `timeout` (which aborts the request).
+		this.setTimers(delayMs, timeoutMs);
 	}
 
 	/**
@@ -510,7 +563,7 @@ export class Fch extends URL {
 	 * @returns {boolean}
 	 */
 	get aborted(): boolean {
-		return this.masterController.signal.aborted || this.timedOut;
+		return this.masterController.signal.aborted || this.requestTimedOut;
 	}
 
 	/**
@@ -1076,6 +1129,133 @@ export class Fch extends URL {
 	}
 
 	// ============================================================
+	// UI timers — idle -> submitting -> delayed -> timeout
+	// ============================================================
+
+	/**
+	 * Current UI timer phase. A getter in plain `Fch`; the Nano Stores plugin
+	 * turns it into a store, so templates can subscribe instead of polling.
+	 */
+	get timer(): TimerState {
+		return this.timerState;
+	}
+
+	/** `true` while the request is in flight (submitting, delayed or timeout). */
+	get loading(): boolean {
+		return this.timerState !== 'idle';
+	}
+
+	/** `true` once `delayMs` elapsed before settling — show a spinner on this. */
+	get delayed(): boolean {
+		return this.timerState === 'delayed' || this.timerState === 'timeout';
+	}
+
+	/** `true` once `timeoutMs` elapsed before settling. */
+	get timedOut(): boolean {
+		return this.timerState === 'timeout';
+	}
+
+	/** Snapshot of the timer state, for logging or `useStore`-style adapters. */
+	get timerInfo(): TimerInfo {
+		return {
+			state: this.timerState,
+			loading: this.loading,
+			delayed: this.delayed,
+			timedOut: this.timedOut,
+			elapsed: this.timerStartedAt ? Date.now() - this.timerStartedAt : 0,
+		};
+	}
+
+	/**
+	 * Subscribe to timer phase changes. The listener fires on every transition
+	 * (`submitting`, `delayed`, `timeout`, and back to `idle`) but not on every
+	 * request, so a render loop cannot thrash.
+	 *
+	 * @param listener - Called with the new phase.
+	 * @returns Unsubscribe function.
+	 */
+	onTimer(listener: (state: TimerState) => void): () => void {
+		this.timerListeners.push(listener);
+		return () => {
+			const i = this.timerListeners.indexOf(listener);
+			if (i !== -1) this.timerListeners.splice(i, 1);
+		};
+	}
+
+	/**
+	 * Configure the UI timers. They never abort a request: `timeout` is the
+	 * option that does. A `delayMs` greater than `timeoutMs` is rejected, because
+	 * the phases would be unreachable in order.
+	 */
+	setTimers(delayMs: number | false, timeoutMs: number | false = this.timeoutMs): this {
+		for (const [name, value] of [['delayMs', delayMs], ['timeoutMs', timeoutMs]] as const) {
+			if (value !== false && (!Number.isFinite(value) || value < 0)) {
+				throw new Error(`Invalid ${name}: ${value}`);
+			}
+		}
+		if (delayMs !== false && timeoutMs !== false && delayMs > timeoutMs) {
+			throw new Error(
+				`delayMs (${delayMs}) must be less than or equal to timeoutMs (${timeoutMs})`,
+			);
+		}
+		this.delayMs = delayMs;
+		this.timeoutMs = timeoutMs;
+		return this;
+	}
+
+	/** When the current execution started (`0` when idle). */
+	private timerStartedAt = 0;
+	/** Pending UI timers for the current execution. */
+	private timerHandles: ReturnType<typeof setTimeout>[] = [];
+
+	/** Move to a new phase and notify, but only on an actual change. */
+	private setTimerState(next: TimerState): void {
+		if (this.timerState === next) return;
+		this.timerState = next;
+		for (const listener of this.timerListeners) listener(next);
+	}
+
+	/**
+	 * Start the timer state machine for one execution. Timers are cleaned up in
+	 * {@link stopTimers}, so a settled request leaves nothing pending.
+	 */
+	private startTimers(): void {
+		this.clearTimers();
+		this.timerStartedAt = Date.now();
+		this.setTimerState('submitting');
+
+		if (this.delayMs !== false) {
+			this.timerHandles.push(
+				setTimeout(() => {
+					// Only advance if still in flight; a fast response wins.
+					if (this.loading) this.setTimerState('delayed');
+				}, this.delayMs),
+			);
+		}
+
+		if (this.timeoutMs !== false) {
+			this.timerHandles.push(
+				setTimeout(() => {
+					if (this.loading) this.setTimerState('timeout');
+				}, this.timeoutMs),
+			);
+		}
+	}
+
+	/** Stop the pending UI timers without changing the phase. */
+	private clearTimers(): void {
+		for (const handle of this.timerHandles) clearTimeout(handle);
+		this.timerHandles = [];
+	}
+
+	/** Finish an execution: stop timers and return to idle. */
+	private stopTimers(): void {
+		this.clearTimers();
+		this.timerStartedAt = 0;
+		this.setTimerState('idle');
+	}
+
+	// ============================================================
 	// Interceptors
 	// ============================================================
 
@@ -1163,6 +1343,7 @@ export class Fch extends URL {
 		// regardless of retries, and cover every entry point (`await req`,
 		// `.json()`, `.send()`, shortcuts and the tagged template) because they
 		// all funnel through here.
+		this.startTimers();
 		for (const hook of this.pluginHooks.request) hook(this);
 
 		try {
@@ -1176,6 +1357,10 @@ export class Fch extends URL {
 		} catch (error) {
 			for (const hook of this.pluginHooks.error) hook(error);
 			throw error;
+		} finally {
+			// Settled: cancel pending UI timers and report idle. `finally` covers
+			// success, failure and abort alike, so a phase can never leak.
+			this.stopTimers();
 		}
 	}
 
@@ -1217,7 +1402,7 @@ export class Fch extends URL {
 		// A new request clears the previous request's timeout state. Only this
 		// point resets it — an attempt succeeding must not, or a concurrent
 		// success would erase the timeout of a request still in flight.
-		this.timedOut = false;
+		this.requestTimedOut = false;
 
 		if (!Number.isInteger(retries) || retries < 0) {
 			throw new Error(`Invalid retries: ${retries}`);
@@ -1318,7 +1503,7 @@ export class Fch extends URL {
 				if (this.timeout > 0) {
 					timeoutId = setTimeout(() => {
 						attemptTimedOut = true;
-						this.timedOut = true;
+						this.requestTimedOut = true;
 						timeoutController.abort(new DOMException('Request timeout', 'TimeoutError'));
 					}, this.timeout);
 				}
@@ -1344,7 +1529,7 @@ export class Fch extends URL {
 					});
 
 					// Note: a successful attempt deliberately does NOT clear
-					// `this.timedOut` — a concurrent request may have timed out, and
+					// `this.requestTimedOut` — a concurrent request may have timed out, and
 					// erasing that would misreport it. The next request resets it.
 					if (timeoutId) clearTimeout(timeoutId);
 

@@ -31,6 +31,19 @@ try {
 }
 ```
 
+## `timeout` vs `timeoutMs`
+
+Two similarly named options with different jobs:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `timeout` | `30000` | **Aborts** the attempt after N ms |
+| `timeoutMs` | `8000` | Only reports a `timeout` *phase* to the UI timers |
+
+`timeoutMs` exists for loading indicators — "this is taking long" — and never
+touches the request. Use `timeout` when you want the request to fail. See
+[loading timers](nanostores.md#loading-timers).
+
 ## Per attempt, not per request
 
 The timeout applies to **each attempt**, independently of the retry loop. With
