@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/westtrade/Fch/compare/v1.10.0...v1.11.0) (2026-10-19)
+
+
+### Features
+
+* publish llms.txt and llms-full.txt for agents ([e6707dc](https://github.com/westtrade/Fch/commit/e6707dc54d3166377fd9a7121a2adaee53e25944))
+
 # [1.10.0](https://github.com/westtrade/Fch/compare/v1.9.0...v1.10.0) (2026-10-19)
 
 
