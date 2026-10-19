@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/westtrade/Fch/compare/v1.9.0...v1.10.0) (2026-10-19)
+
+
+### Features
+
+* add a response-validation plugin, and correct the docs that said it was ([5210f6a](https://github.com/westtrade/Fch/commit/5210f6ac3098c74e8fcb31c1f13fba7bad8c73fb))
+
 # [1.9.0](https://github.com/westtrade/Fch/compare/v1.8.0...v1.9.0) (2026-10-19)
 
 
