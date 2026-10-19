@@ -113,16 +113,53 @@ The literal entry is *not* a duplicate: 1.02× the main bundle, one
 current feature set: wretch is 3.6× smaller, and beating ofetch needs a 39% cut.
 Only removing features closes that gap.
 
-Weight candidates:
+### Measured cost of each feature
 
-- 7 deprecated aliases;
-- dedupe + `Idempotency-Key` (unique, not needed by everyone);
-- `poll()`;
-- form helpers (`toFormData` / `resolveForm` / `buildFormData` / submitter);
-- the logger (4 levels + `adaptLogger` + default logger);
+Removing a member and re-minifying, so these are byte deltas of the real build
+(15 657 B baseline), not estimates:
+
+| Feature | Cost |
+| --- | --- |
+| request execution + retry loop (`executeRequest`) | 2 544 B |
+| `clone()` | 1 021 B |
+| logger (all 4 levels, adapters, gating) | ~818 B |
+| `setFormUrlEncodedBody()` | 233 B |
+| `setFormData()` | 403 B |
+| `appendToFormData()` | 245 B |
+| 7 deprecated aliases | ~191 B |
+| `poll()` | 285 B |
+| `setFetchOptions()` | 234 B |
+| dedupe (key resolution + header) | ~131 B |
+| `setBody()` / `isNativeBody` | 179 + 303 B |
+| form parsing (`toFormData`/`resolveForm`/`buildFormData`) | 526 B |
+| URL validation (`assertAbsolute`) | 440 B |
+
+### Why splitting into plugins does not reach wretch
+
+A "core only" build — every optional member and helper above removed at once —
+still measures **11 993 B**, i.e. **2.8× wretch's entire 4 302 B**. The optional
+features total only **3 613 B**: even deleting *all* of them leaves a 12 kB
+package, because the irreducible part is the retry/timeout/URL machinery the
+library exists for.
+
+Plugin splitting is still worth doing — it is a 23% cut for users who want only
+the request core — but it cannot deliver "smaller than wretch". Two further
+reasons the comparison flatters wretch:
+
+- wretch's retry lives in `wretch/middlewares` and its FormData support in
+  `wretch/addons`, so its 4.3 kB is not the same feature set;
+- `Fch` parses responses, validates URLs, types bodies and carries a thenable
+  builder API, which wretch does not.
+
+Realistic target: **below ofetch (9 527 B)** after the split, and **below
+axios/ky** today. Not below wretch.
+
+Weight candidates, in the order the measurements justify:
+
+- everything in the table above that a plugin could carry (~3.6 kB);
 - the `combineSignals` fallback (only matters below Node 18, which already
   needs a `fetch` polyfill);
-- body copying in `clone()` (5 type branches).
+- body copying in `clone()` (5 type branches, accounts for most of its 1 kB).
 
 ### TODO
 
