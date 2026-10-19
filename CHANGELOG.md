@@ -1,3 +1,10 @@
+## [1.2.5](https://github.com/westtrade/Fch/compare/v1.2.4...v1.2.5) (2026-10-19)
+
+
+### Bug Fixes
+
+* **site:** tolerate a missing docs-src/static directory ([a7ae982](https://github.com/westtrade/Fch/commit/a7ae98274a15e7a54e5933f7693c06312b97ae73))
+
 ## [1.2.4](https://github.com/westtrade/Fch/compare/v1.2.3...v1.2.4) (2026-10-19)
 
 
