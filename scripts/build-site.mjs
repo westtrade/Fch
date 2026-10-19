@@ -131,21 +131,21 @@ function renderTabs(text) {
 	const code = (section) => section.lines.join('\n').replace(/^\n+|\n+$/g, '')
 	const buttons = sections
 		.map(
-			(section, i) => `<button type="button" role="tab" x-on:click="tab = '${section.key}'" :aria-selected="tab === '${section.key}'" :class="tab === '${section.key}' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:bg-slate-800/40 hover:text-slate-100'" class="rounded-t-md px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider transition"${i === 0 ? ' id="tab-first"' : ''}>${escapeHtml(TAB_LABELS[section.key] || section.key)}</button>`
+			(section, i) => `<button type="button" role="tab" x-on:click="tab = '${section.key}'" :aria-selected="tab === '${section.key}'" :class="tab === '${section.key}' ? 'bg-indigo-600 text-white shadow-sm' : 'text-indigo-200/80 hover:bg-indigo-900/60 hover:text-white'" class="cursor-pointer rounded-t-md px-3 py-1.5 font-mono text-[11px] font-medium uppercase tracking-wider transition"${i === 0 ? ' id="tab-first"' : ''}>${escapeHtml(TAB_LABELS[section.key] || section.key)}</button>`
 		)
 		.join('')
 
 	const panels = sections
 		.map(
 			(section) => `<div x-show="tab === '${section.key}'" x-cloak role="tabpanel" class="group relative">
-<button type="button" class="absolute right-2 top-2 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 opacity-0 transition hover:bg-slate-700 focus:opacity-100 group-hover:opacity-100" x-on:click="navigator.clipboard.writeText($el.parentElement.querySelector('code').innerText); copied = true; setTimeout(() => copied = false, 1400)" x-text="copied ? 'copied' : 'copy'">copy</button>
+<button type="button" class="absolute right-2 top-2 cursor-pointer rounded-md border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 opacity-0 transition hover:bg-slate-700 focus:opacity-100 group-hover:opacity-100" x-on:click="navigator.clipboard.writeText($el.parentElement.querySelector('code').innerText); copied = true; setTimeout(() => copied = false, 1400)" x-text="copied ? 'copied' : 'copy'">copy</button>
 <pre class="!mt-0 !rounded-t-none !pt-9"><code class="hljs language-ts">${highlight(code(section), 'ts')}</code></pre>
 </div>`
 		)
 		.join('\n')
 
 	return `<div class="my-5" x-data="{ tab: '${sections[0].key}', copied: false }">
-<div class="flex gap-1 rounded-t-xl border border-b-0 border-slate-700 bg-slate-900 px-2 pt-1" role="tablist">${buttons}</div>
+<div class="flex gap-1 rounded-t-xl border border-b-0 border-slate-700 bg-indigo-950 px-2 pt-1" role="tablist">${buttons}</div>
 ${panels}
 </div>`
 }
@@ -161,7 +161,7 @@ renderer.code = ({ text, lang }) => {
 	const highlighted = hljs.highlight(text, { language, ignoreIllegals: true }).value
 	const label = lang || 'text'
 	return `<div class="group relative my-5" x-data="{ copied: false }">
-<button type="button" class="absolute right-2 top-2 rounded-md border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 opacity-0 transition hover:bg-slate-700 focus:opacity-100 group-hover:opacity-100" x-on:click="navigator.clipboard.writeText($refs.code.innerText); copied = true; setTimeout(() => copied = false, 1400)" x-text="copied ? 'copied' : 'copy'">copy</button>
+<button type="button" class="absolute right-2 top-2 cursor-pointer rounded-md border border-slate-700 bg-slate-800 px-2 py-1 font-mono text-[11px] text-slate-300 opacity-0 transition hover:bg-slate-700 focus:opacity-100 group-hover:opacity-100" x-on:click="navigator.clipboard.writeText($refs.code.innerText); copied = true; setTimeout(() => copied = false, 1400)" x-text="copied ? 'copied' : 'copy'">copy</button>
 <span class="absolute left-3 top-2.5 font-mono text-[11px] uppercase tracking-wider text-slate-500">${escapeHtml(label)}</span>
 <pre class="!pt-9"><code x-ref="code" class="hljs language-${escapeHtml(language)}">${highlighted}</code></pre>
 </div>`
@@ -249,7 +249,7 @@ const header = () => `
 			</a>
 			<a href="${GITHUB}" class="hidden rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:inline">GitHub</a>
 			<a href="${GITHUB}" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900" aria-label="GitHub">${icon(ICONS.github)}</a>
-			<button type="button" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" x-on:click="nav = !nav" :aria-expanded="nav" aria-controls="mobile-nav" aria-label="Menu">
+			<button type="button" class="cursor-pointer rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" x-on:click="nav = !nav" :aria-expanded="nav" aria-controls="mobile-nav" aria-label="Menu">
 				<span x-show="!nav">${icon(ICONS.menu)}</span>
 				<span x-show="nav" x-cloak>${icon(ICONS.close)}</span>
 			</button>

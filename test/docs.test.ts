@@ -252,15 +252,40 @@ describe("tab header legibility", () => {
 	test("the tab bar has an opaque background", () => {
 		// Classes precede `role` in the tag, so capture the whole element.
 		const bar = buildScript.match(/<div class="[^"]*"[^>]*role="tablist"/)?.[0] ?? "";
-		expect(bar).toContain("bg-slate-900");
+		// Any solid tint works; what matters is that it is opaque.
+		expect(bar).toMatch(/bg-(slate|indigo)-\d{2,3}/);
 		// No `bg-slate-800/60`-style translucency on the bar.
 		expect(bar).not.toMatch(/bg-slate-\d+\/\d+/);
 	});
 
 	test("the active tab is distinguishable by surface, not colour alone", () => {
-		// Active: solid slate-800 + white text. Inactive: transparent + slate-400.
-		expect(buildScript).toContain("bg-slate-800 text-white");
-		expect(buildScript).toContain("text-slate-400");
+		// Active: filled indigo-600 + white text. Inactive: muted indigo on the bar.
+		expect(buildScript).toContain("bg-indigo-600 text-white");
+		expect(buildScript).toMatch(/text-indigo-2\d\d/);
+	});
+
+	test("every interactive element signals clickability", () => {
+		// Buttons default to `cursor: default` in browsers, so each one needs the
+		// utility explicitly: tabs, copy buttons, menu toggles.
+		const landing = readFileSync(resolve(root, "docs-src/index.html"), "utf8");
+		for (const source of [
+			{ name: "build-site.mjs", body: buildScript },
+			{ name: "index.html", body: landing },
+		]) {
+			const buttons = [...source.body.matchAll(/<button[^>]*>/g)].map((m) => m[0]);
+			expect(buttons.length, `${source.name} has no buttons`).toBeGreaterThan(0);
+			for (const button of buttons) {
+				expect(button, `${source.name}: button without cursor-pointer`).toContain("cursor-pointer");
+			}
+		}
+	});
+
+	test("the tab bar is visually distinct from the code block", () => {
+		// A slate bar on slate code looked like one surface; the header is tinted.
+		const bar = buildScript.match(/<div class="[^"]*"[^>]*role="tablist"/)?.[0] ?? "";
+		expect(bar).toMatch(/bg-indigo-\d+/);
+		// And the selected tab is a filled accent, not a subtle shade.
+		expect(buildScript).toContain("bg-indigo-600 text-white");
 	});
 
 	test("inactive label colour meets WCAG AA on the bar", () => {
@@ -274,8 +299,8 @@ describe("tab header legibility", () => {
 			const [x, y] = [lum(a), lum(b)].sort((m, n) => n - m);
 			return (x + 0.05) / (y + 0.05);
 		};
-		const slate400 = [148, 163, 184];
-		const slate900 = [15, 23, 42];
-		expect(ratio(slate400, slate900)).toBeGreaterThanOrEqual(4.5);
+		const indigo200 = [199, 210, 254]; // inactive label
+		const indigo950 = [30, 27, 75]; // tab bar
+		expect(ratio(indigo200, indigo950)).toBeGreaterThanOrEqual(4.5);
 	});
 });
