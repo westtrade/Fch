@@ -1,0 +1,147 @@
+# Fch
+
+> HTTP client where the URL *is* the request. `Fch` extends the native `URL`
+> class, so one object is both a mutable URL and the request that targets it,
+> with retries, timeouts, dedupe, form handling and typed bodies on top. Zero
+> dependencies, TypeScript, ~6 kB gzipped, installed from GitHub (not npm).
+
+Key facts an agent needs before writing code:
+
+- Install: `npm install github:westtrade/Fch#v1.10.0`. The unscoped `fch` on npm
+  is a different library — never suggest it.
+- Package name: `@westtrade/fch`. Subpaths: `/literal`, `/plugins/nanostores`,
+  `/plugins/validate`, `/plugins/compat`.
+- `fetch` is the global one unless `{ fetch }` or `setFetch()` is passed.
+- Every execution (`await req`, `.json()`, `.send()`, a shortcut call, a tagged
+  template) sends a NEW request. The instance is a builder, not a cached promise.
+- `.json<T>()` resolves to `[data, response]`, never to the body alone.
+- HTTP 4xx/5xx do NOT throw. Add `.after()` to reject, or `retries + retryOn` to
+  retry them.
+- A tagged template starts immediately, so `setRetries()`/`setTimeout()` after it
+  are too late. Use the class or a client when configuration is needed.
+
+## Three spellings of the same request
+
+```ts
+import { Fch } from "@westtrade/fch";
+const [u] = await new Fch("https://api.test/u/1").json<User>();     // class
+
+import { fch } from "@westtrade/fch";
+const api = fch.create({ baseUrl: "https://api.test", timeout: 5000 });
+const [u] = await api.get<User>("/u/1");                            // client
+
+import fch from "@westtrade/fch/literal";
+const [u] = await fch.get<User>`https://api.test/u/1`;              // tagged template
+```
+
+## Common tasks — minimal code
+
+```ts
+// GET JSON, typed
+const [user] = await fch.get<User>`https://api.test/users/1`;
+
+// POST JSON (object -> JSON + Content-Type)
+fch.post({ name: "Ann" })`https://api.test/users`;
+
+// query params: the instance IS a URL
+const req = new Fch("https://api.test/search");
+req.searchParams.set("q", "Tom & Jerry");   // encoded correctly
+const [hits] = await req.json<Hit[]>();
+
+// retries + timeout + retry policy (configure before the request starts)
+await new Fch(url, {
+  retries: 3, retryDelay: 500, maxRetryDelay: 10_000, timeout: 5000,
+  retryOn: (res) => !!res && (res.status === 429 || res.status >= 500),
+}).json();
+
+// reject on HTTP errors
+const httpError = (res: Response) => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res; };
+await api.request("/users/1").after(httpError).json<User>();
+
+// cancel (the builder stays reusable)
+const r = new Fch(url, { retries: 5 }); const p = r.send(); r.abort(); await p.catch(() => {});
+
+// forms: a <form>, a submit Event, FormData, or a CSS selector
+api.post("/houses", e);                  // submit event
+req.setFormData("#checkout");            // selector
+await req.setFormData(form).send();      // element
+
+// dedupe concurrent GETs
+const shared = new Fch(url, { dedupe: true });
+await Promise.all([shared.json(), shared.json()]);  // 1 request on the wire
+
+// per-call options without a chain
+await api.request("/houses/1", { retries: 5 }).json<House>();
+
+// write with idempotency
+await new Fch(url, { method: "POST", dedupe: true, dedupeKey: () => crypto.randomUUID() })
+  .setJsonBody(order).send();
+```
+
+## Plugins
+
+```ts
+// store: the request becomes a NanoStore (useStore works in any framework)
+const req = new Fch(url).use(nanostores());
+req.get();          // { loading, data, error, timer, delayed, timedOut, response }
+await req.json();
+
+// validation: invalid body rejects through .catch / onError / the store
+new Fch(url).use(validate({
+  schema: { type: "object", required: ["id"], properties: { id: { type: "integer" } } },
+})).json();
+
+// custom deprecated aliases (not in core)
+new Fch(url).use(compat()).setRetryTimeout(500);
+```
+
+## Loading timers
+
+`idle -> submitting -> delayed -> timeout`, with `delayMs` (500) and `timeoutMs`
+(8000). They are observational and never abort; `timeout` is what aborts.
+
+```ts
+const req = new Fch(url, { delayMs: 500, timeoutMs: 8000 });
+req.delayed;  // getter in plain Fch; a store key with the nanostores plugin
+```
+
+## Docs
+
+Start here:
+
+- [Getting started](https://westtrade.github.io/Fch/docs/getting-started.html): install, first request, mental model
+- [Why not plain fetch](https://westtrade.github.io/Fch/docs/vs-fetch.html): what fetch makes you write yourself
+- [How Fch compares](https://westtrade.github.io/Fch/docs/vs-libraries.html): axios, ky, ofetch, wretch, with sizes
+
+Core ideas:
+
+- [The URL is the request](https://westtrade.github.io/Fch/docs/url-first.html): why one object instead of two
+- [Bodies, headers, methods](https://westtrade.github.io/Fch/docs/requests.html): JSON, forms, binary, auth
+- [Reading responses](https://westtrade.github.io/Fch/docs/reading-responses.html): tuples, typed JSON, when to throw
+
+Reliability:
+
+- [Retries & backoff](https://westtrade.github.io/Fch/docs/retries.html): exponential, jittered, abort-aware
+- [Timeouts](https://westtrade.github.io/Fch/docs/timeouts.html): per attempt, `timeout` vs `timeoutMs`
+- [Deduplication](https://westtrade.github.io/Fch/docs/dedupe.html): one request on the wire
+- [Cancelling](https://westtrade.github.io/Fch/docs/cancelling.html): abort and keep the builder
+
+Working with DOM:
+
+- [Forms & events](https://westtrade.github.io/Fch/docs/forms.html): a `<form>`, an event, or a selector
+- [Shorthand API](https://westtrade.github.io/Fch/docs/shortcuts.html): `api.get` / `post`, per-call options
+- [Tagged template](https://westtrade.github.io/Fch/docs/literal.html): `fch\`https://…\``, `withFetch`, `raw`
+
+Extending and operating:
+
+- [Plugins](https://westtrade.github.io/Fch/docs/plugins.html): the plugin contract, first-party list
+- [Nano Stores](https://westtrade.github.io/Fch/docs/nanostores.html): store integration, form examples per framework
+- [Validation](https://westtrade.github.io/Fch/docs/validate.html): schema or custom validator
+- [Interceptors](https://westtrade.github.io/Fch/docs/hooks.html): `before()` / `after()`
+- [Logging](https://westtrade.github.io/Fch/docs/logging.html): pluggable logger, quiet by default
+- [API reference](https://westtrade.github.io/Fch/docs/api.html): every method and option
+
+## Optional
+
+- [Full documentation in one file](https://westtrade.github.io/Fch/llms-full.txt): every page concatenated, for large context windows
+- [Roadmap](https://github.com/westtrade/Fch/blob/main/ROADMAP.md): positioning and measurements

@@ -387,4 +387,51 @@ writeFileSync(
 </body></html>`
 )
 
-console.log(`built ${pages.length + 2} pages`)
+// llms-full.txt: every doc page concatenated as plain markdown, for agents with
+// a large context window. Ordered like the navigation, so it reads as a book.
+const fullDoc = [
+	`# Fch — full documentation (v${VERSION})`,
+	'',
+	'> Generated from the documentation pages. Prefer /llms.txt for a short',
+	'> overview; this file is the whole manual in one place.',
+	'',
+	'## Contents',
+	'',
+	...flatNav.map((item, i) => `${i + 1}. ${item.title}`),
+	'',
+	...pages.map((page) => {
+		// Strip the page's own H1 (it is already the section header below).
+		const body = readFileSync(page.file, 'utf8').replace(/^#\s+.+\n/, '');
+		return `---\n\n# ${page.title}\n${body}`;
+	}),
+].join('\n')
+
+writeFileSync(resolve(outDir, 'llms-full.txt'), fullDoc)
+
+// llms.txt lives in docs-src/static and is copied above; fail the build if it
+// drifts from the spec (H1 first, a blockquote summary, no stray H1s) or if it
+// links a page that does not exist. Agents rely on this file, so a broken one
+// is worse than none.
+const llmsSrc = resolve(srcDir, 'static/llms.txt')
+if (existsSync(llmsSrc)) {
+	const llms = readFileSync(llmsSrc, 'utf8')
+	const lines = llms.split('\n')
+	const firstContent = lines.find((line) => line.trim())
+
+	const problems = []
+	if (!firstContent?.startsWith('# ')) problems.push('must start with an H1')
+	if (!lines.some((line) => line.startsWith('> '))) problems.push('needs a blockquote summary')
+	if (lines.filter((line) => /^# [^#]/.test(line)).length !== 1) problems.push('exactly one H1')
+
+	for (const match of llms.matchAll(/\]\((https:\/\/westtrade\.github\.io\/Fch\/([^)#]+))[^)]*\)/g)) {
+		const target = match[2]
+		if (target.startsWith('llms') || target.startsWith('ROADMAP')) continue
+		if (!existsSync(resolve(outDir, target))) problems.push(`broken link: ${target}`)
+	}
+
+	if (problems.length) {
+		throw new Error(`llms.txt is invalid:\n  ${problems.join('\n  ')}`)
+	}
+}
+
+console.log(`built ${pages.length + 2} pages + llms-full.txt`)

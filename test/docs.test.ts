@@ -321,3 +321,54 @@ describe("tab header legibility", () => {
 		expect(ratio(indigo200, indigo950)).toBeGreaterThanOrEqual(4.5);
 	});
 });
+
+describe("llms.txt", () => {
+	// The file agents read instead of scraping the site. It is copied verbatim,
+	// so its accuracy is a test concern, not a build-time one.
+	const llmsPath = resolve(root, "docs-src/static/llms.txt");
+	const exists = existsSync(llmsPath);
+
+	test("exists and follows the spec skeleton", () => {
+		expect(exists, "docs-src/static/llms.txt is missing").toBe(true);
+		const text = readFileSync(llmsPath, "utf8");
+
+		// Spec: H1, then a blockquote summary, then free-form sections.
+		expect(text.startsWith("# ")).toBe(true);
+		expect(text).toMatch(/^> /m);
+		expect(text.match(/^# [^#]/gm)).toHaveLength(1);
+	});
+
+	test("stays short enough to be a cheat sheet", () => {
+		// The whole point is a small input cost. 250 lines is generous already.
+		expect(readFileSync(llmsPath, "utf8").split("\n").length).toBeLessThan(250);
+	});
+
+	test("every documented page is linked", () => {
+		const text = readFileSync(llmsPath, "utf8");
+		// A cheat sheet whose links rot is worse than none: check each slug.
+		for (const page of pages) {
+			expect(text, `llms.txt does not link ${page.slug}.html`).toContain(
+				`docs/${page.slug}.html`,
+			);
+		}
+	});
+
+	test("names the scoped package and the real install source", () => {
+		const text = readFileSync(llmsPath, "utf8");
+
+		expect(text).toContain("@westtrade/fch");
+		expect(text).toContain("github:westtrade/Fch");
+		// The trap the rest of the docs guard against.
+		expect(text).toMatch(/unscoped `fch` on npm is a different library|never suggest it/i);
+	});
+
+	test("documents the traps that agents get wrong", () => {
+		const text = readFileSync(llmsPath, "utf8");
+
+		// Each of these has bitten a real reader; all belong in the cheat sheet.
+		expect(text).toMatch(/4xx\/5xx do NOT throw|do not throw/i);
+		expect(text).toMatch(/NEW request/);
+		expect(text).toMatch(/starts immediately/);
+		expect(text).toMatch(/\[data, response\]/);
+	});
+});
