@@ -1,6 +1,7 @@
 // Regression tests for the second-round review findings (B1–B7 + cleanup).
 import { describe, expect, test, vi } from "vitest";
 import { Fch, fch, create, type Logger } from "../src/Fch";
+import { logger as loggerPlugin } from "../src/plugins/logger";
 
 const B = "https://api.example.com";
 
@@ -29,7 +30,7 @@ describe("B1 — catch() logs only on a real rejection", () => {
 	test("no error line when the request succeeds", async () => {
 		const logger = useLogger();
 		stubFetch(() => ok());
-		const req = new Fch(`${B}/x`, { logger });
+		const req = new Fch(`${B}/x`).use(loggerPlugin({ logger }));
 
 		await req.catch(() => {});
 
@@ -41,7 +42,7 @@ describe("B1 — catch() logs only on a real rejection", () => {
 		stubFetch(() => {
 			throw new Error("network down");
 		});
-		const req = new Fch(`${B}/x`, { logger });
+		const req = new Fch(`${B}/x`).use(loggerPlugin({ logger }));
 
 		const caught = await req.catch((e) => (e as Error).message);
 
@@ -151,12 +152,15 @@ describe("B5 — a throwing after() hook is not retried", () => {
 	test("the failure is logged as an interceptor error", async () => {
 		const logger = useLogger();
 		stubFetch(() => ok());
-		const req = new Fch(`${B}/i2`, { retries: 2, logger }).after(() => {
+		const req = new Fch(`${B}/i2`, { retries: 2 }).use(loggerPlugin({ logger })).after(() => {
 			throw new Error("Unauthorized");
 		});
 
 		await expect(req.send()).rejects.toThrow("Unauthorized");
-		expect(logger.error).toHaveBeenCalledWith("Response interceptor failed:", "Unauthorized");
+		// The plugin formats one message per event, so the details are inside it.
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.stringContaining("Response interceptor failed: Unauthorized"),
+		);
 	});
 });
 

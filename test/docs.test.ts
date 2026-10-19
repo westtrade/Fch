@@ -4,6 +4,7 @@ import { gzipSync } from "node:zlib";
 import { resolve } from "node:path";
 import { Fch, create } from "../src/Fch";
 import { compat, DEPRECATED_MEMBERS } from "../src/plugins/compat";
+import { logger as loggerPlugin } from "../src/plugins/logger";
 
 // Guards the documentation site against drift: every page must exist, every
 // internal link must resolve, and the API reference must name real members.
@@ -56,11 +57,16 @@ describe("documentation site", () => {
 			string,
 			unknown
 		>;
+		const withLogger = new Fch("https://api.example.com/x").use(
+			loggerPlugin(),
+		) as never as Record<string, unknown>;
 
 		// Names documented on the builder must exist on the builder; the rest are
 		// create()-only, constructor-only, or plugin-provided.
 		const clientOnly = new Set(["get", "head", "post", "put", "patch", "delete", "request"]);
 		const pluginProvided = new Set<string>(DEPRECATED_MEMBERS);
+		const LOGGER_MEMBERS = ["getLogger", "setLogger", "enableLogging", "disableLogging"];
+		const loggerProvided = new Set<string>(LOGGER_MEMBERS);
 
 		for (const name of new Set(members)) {
 			if (clientOnly.has(name)) {
@@ -69,6 +75,10 @@ describe("documentation site", () => {
 			}
 			if (pluginProvided.has(name)) {
 				expect(typeof withCompat[name], `compat.${name}`).toBe("function");
+				continue;
+			}
+			if (loggerProvided.has(name)) {
+				expect(typeof withLogger[name], `logger.${name}`).toBe("function");
 				continue;
 			}
 			if (name === "fch" || name === "Fch" || name === "create") continue;

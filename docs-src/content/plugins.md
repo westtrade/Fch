@@ -124,6 +124,7 @@ as above, or call `use()` explicitly.
 | --- | --- |
 | [Nano Stores](nanostores.md) | the request becomes a store, any framework |
 | [Validation](validate.md) | reject a body that breaks the contract |
+| [Logger](logging.md) | console, pino or your own; quiet unless asked |
 | [Compat](api.md#deprecated-aliases) | the four deprecated method aliases |
 
 `compat()` is also the smallest real example of the pattern: it takes over names

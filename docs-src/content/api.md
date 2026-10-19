@@ -236,7 +236,10 @@ const req = new Fch(url).use(compat());
 
 `DEPRECATED_MEMBERS` is exported for tooling and tests.
 
-## Logging
+## Logging (plugin)
+
+Logging lives in `@westtrade/fch/plugins/logger`; the core only emits events.
+Attaching it adds these members back:
 
 | Method | Behaviour |
 | --- | --- |
@@ -244,6 +247,13 @@ const req = new Fch(url).use(compat());
 | `getLogger()` | Logger proxy that respects the instance's gating |
 | `enableLogging()` | `debug: true` |
 | `disableLogging()` | `debug: false` |
+
+```ts
+new Fch(url).use(logger({ logger: pinoLogger, debug: true }));
+```
+
+The `logger` and `debug` constructor options are still accepted, and the plugin
+adopts them when installed.
 
 ## UI timers
 

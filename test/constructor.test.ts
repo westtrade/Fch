@@ -2,6 +2,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { setupServer } from "msw/node";
 import { Fch, type Logger, type FetchRequestOptions } from "../src/Fch";
+import { logger } from "../src/plugins/logger";
 
 const server = setupServer();
 
@@ -50,16 +51,16 @@ describe("Fch Constructor", () => {
 			error: () => {},
 		};
 
-		// A valid logger is kept behind the debug-aware wrapper.
-		const fch1 = new Fch("https://api.example.com", {
-			logger: customLogger,
-		});
+		// Logging is a plugin now, so the logger option lives there.
+		const fch1 = new Fch("https://api.example.com").use(
+			logger({ logger: customLogger }),
+		);
 		expect(fch1.getLogger().info).toBeInstanceOf(Function);
 
 		// An invalid logger falls back to the default implementation.
-		const fch2 = new Fch("https://api.example.com", {
-			logger: {} as Logger,
-		});
+		const fch2 = new Fch("https://api.example.com").use(
+			logger({ logger: {} as Logger }),
+		);
 		expect(fch2.getLogger().info).toBeInstanceOf(Function);
 	});
 

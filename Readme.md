@@ -214,7 +214,7 @@ options second.
 | Dedupe | `setDedupeKey()` |
 | Interceptors | `before()`, `after()` |
 | Deprecated aliases | `@westtrade/fch/plugins/compat` — `setRetryTimeout`, `setIdempotencyKey`, `addRequestInterceptor`, `addResponseInterceptor` |
-| Logging | `getLogger()`, `setLogger()`, `enableLogging()`, `disableLogging()` |
+| Logging | `@westtrade/fch/plugins/logger` — `getLogger()`, `setLogger()`, `enableLogging()`, `disableLogging()` |
 | Lifecycle | `abort()`, `aborted`, `clone()`, `start()` |
 | Polling | `poll(delay?)` — async generator of repeated responses; `delay` is used exactly, not clamped by `maxRetryDelay` |
 

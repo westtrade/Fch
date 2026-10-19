@@ -1,5 +1,6 @@
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import { Fch, type Logger } from "../src/Fch";
+import { logger } from "../src/plugins/logger";
 
 describe("Fch Logger", () => {
 	let mockLogger: Logger;
@@ -17,7 +18,7 @@ describe("Fch Logger", () => {
 	});
 
 	test("should use default logger when none provided", () => {
-		const fch = new Fch("https://api.example.com", { debug: true });
+		const fch = new Fch("https://api.example.com").use(logger({ debug: true }));
 
 		fch.getLogger().info("test info");
 		fch.getLogger().warn("test warn");
@@ -29,10 +30,9 @@ describe("Fch Logger", () => {
 	});
 
 	test("should use custom logger when provided", () => {
-		const fch = new Fch("https://api.example.com", {
-			logger: mockLogger,
-			debug: true,
-		});
+		const fch = new Fch("https://api.example.com").use(
+			logger({ logger: mockLogger, debug: true }),
+		);
 
 		fch.getLogger().info("custom info");
 		fch.getLogger().warn("custom warn");
@@ -45,10 +45,9 @@ describe("Fch Logger", () => {
 
 	test("should fallback to default logger for invalid logger implementations", () => {
 		const invalidLogger = { info: "not-a-function" } as unknown as Logger;
-		const fch = new Fch("https://api.example.com", {
-			logger: invalidLogger,
-			debug: true,
-		});
+		const fch = new Fch("https://api.example.com").use(
+			logger({ logger: invalidLogger, debug: true }),
+		);
 
 		fch.getLogger().info("fallback test");
 
@@ -56,7 +55,7 @@ describe("Fch Logger", () => {
 	});
 
 	test("should respect logging enable/disable state", () => {
-		const fch = new Fch("https://api.example.com", { logger: mockLogger });
+		const fch = new Fch("https://api.example.com").use(logger({ logger: mockLogger }));
 
 		fch.disableLogging().getLogger().info("disabled log");
 		fch.enableLogging().getLogger().warn("enabled log");
@@ -66,10 +65,9 @@ describe("Fch Logger", () => {
 	});
 
 	test("should log request lifecycle events", async () => {
-		const fch = new Fch("https://api.example.com/status/200", {
-			logger: mockLogger,
-			debug: true,
-		});
+		const fch = new Fch("https://api.example.com/status/200").use(
+			logger({ logger: mockLogger, debug: true }),
+		);
 
 		await fch.makeRequest();
 
@@ -82,11 +80,9 @@ describe("Fch Logger", () => {
 	});
 
 	test("should log errors and retries", async () => {
-		const fch = new Fch("https://api.example.com/status/500", {
-			logger: mockLogger,
-			retries: 2,
-			debug: true,
-		});
+		const fch = new Fch("https://api.example.com/status/500", { retries: 2 }).use(
+			logger({ logger: mockLogger, debug: true }),
+		);
 
 		await expect(fch.makeRequest()).resolves.toHaveProperty("status", 500);
 
@@ -94,10 +90,9 @@ describe("Fch Logger", () => {
 	});
 
 	test("should log interceptors activity", async () => {
-		const fch = new Fch("https://api.example.com/header/x-test", {
-			logger: mockLogger,
-			debug: true,
-		});
+		const fch = new Fch("https://api.example.com/header/x-test").use(
+			logger({ logger: mockLogger, debug: true }),
+		);
 
 		fch.before((req) => {
 			req.setHeaders({ "X-Test": "true" });

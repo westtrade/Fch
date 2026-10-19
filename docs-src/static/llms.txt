@@ -93,6 +93,9 @@ new Fch(url)
   .use(validate("response", { schema: { type: "object", required: ["id"] } }))
   .json();
 
+// logging (core only emits events; the plugin prints)
+new Fch(url).use(logger({ debug: true }));
+
 // custom deprecated aliases (not in core)
 new Fch(url).use(compat()).setRetryTimeout(500);
 ```

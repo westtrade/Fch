@@ -80,4 +80,16 @@ export default mod.compat
 `,
 )
 
+writeFileSync(
+	resolve(dist, 'plugins/logger.mjs'),
+	`// ESM wrapper around the CommonJS build (generated).
+import mod from './logger.js'
+
+export const logger = mod.logger
+export const consoleLogger = mod.consoleLogger
+
+export default mod.logger
+`,
+)
+
 console.log('dist/Fch.mjs, dist/Fch.literal.mjs and dist/plugins/*.mjs written')

@@ -45,6 +45,29 @@ export interface Plugin {
 }
 
 /**
+ * Events the core emits for the logger plugin. Deliberately a closed set of
+ * semantic events, not free-form strings: the plugin decides the wording, the
+ * level and whether to print at all.
+ */
+export type LogEvent =
+	/** A request is about to be sent: `(url, method)` */
+	| 'request'
+	/** A response arrived: `(status)` */
+	| 'response'
+	/** A retry was triggered: `(status)` */
+	| 'retry'
+	/** An attempt failed: `(attempt, message)` */
+	| 'failure'
+	/** A response interceptor threw: `(message)` */
+	| 'interceptor-error'
+	/** A concurrent request was deduped: `(key)` */
+	| 'dedupe'
+	/** An error was caught by `.catch()`: `(error)` */
+	| 'caught'
+	/** A body could not be cloned: no arguments */
+	| 'clone-warning';
+
+/**
  * UI timer phase, mirroring Superforms' loading timers:
  *
  * ```
@@ -410,8 +433,17 @@ export class Fch extends URL {
 	// Private state
 	// ============================================================
 
-	private logger: Logger;
-	private debug = false;
+	/**
+	 * Sink installed by the logger plugin. The core emits these five events and
+	 * nothing else; gating, formatting and the console default live in the plugin.
+	 */
+	private logSink: ((event: LogEvent, args: unknown[]) => void) | null = null;
+
+	/** Whether debug-level events are emitted. The logger plugin reads this. */
+	debug: boolean;
+
+	/** The raw `logger` option, adopted by the logger plugin. */
+	readonly loggerOption: Logger | null;
 	private dedupe = false;
 	private dedupeKey: string | (() => string) | null = null;
 	private maxRetryDelay = 30000;
@@ -558,8 +590,8 @@ export class Fch extends URL {
 		this.ownsController = !abortController;
 		this.userSignal = signal ?? undefined;
 
-		this.logger = this.adaptLogger(logger);
 		this.debug = debug;
+		this.loggerOption = logger ?? null;
 		this.dedupe = dedupe;
 		this.dedupeKey = dedupeKey ?? idempotencyKey ?? null;
 		this.retryOn = retryOn;
@@ -568,36 +600,6 @@ export class Fch extends URL {
 		this.setTimers(delayMs, timeoutMs);
 		if (fetchOption) this.setFetch(fetchOption);
 	}
-
-	/**
-	 * Validate a caller-supplied logger, falling back to the default one when the
-	 * object does not implement the full interface. Without this check an invalid
-	 * logger (e.g. `{ info: 'nope' }`) is accepted and then silently swallows
-	 * every log line.
-	 */
-	private adaptLogger(logger?: Logger): Logger {
-		if (!logger) return this.createDefaultLogger();
-
-		const hasRequiredMethods =
-			typeof logger.info === 'function' &&
-			typeof logger.warn === 'function' &&
-			typeof logger.error === 'function';
-
-		return hasRequiredMethods ? logger : this.createDefaultLogger();
-	}
-
-	private createDefaultLogger(): Logger {
-		return {
-			info: console.log.bind(console, '[INFO]'),
-			warn: console.warn.bind(console, '[WARN]'),
-			error: console.error.bind(console, '[ERROR]'),
-			debug: console.debug.bind(console, '[DEBUG]'),
-		};
-	}
-
-	// ============================================================
-	// Logging
-	// ============================================================
 
 	/**
 	 * Whether the request was aborted — either explicitly via {@link Fch.abort}
@@ -612,65 +614,23 @@ export class Fch extends URL {
 	}
 
 	/**
-	 * Enable debug-level logging.
-	 * @returns {Fch} Current instance for chaining.
-	 * @example
-	 * api.enableLogging();
+	 * Install the event sink used by the logger plugin. Not public API: the
+	 * plugin calls it from `install()`.
+	 *
+	 * @internal
 	 */
-	enableLogging(): this {
-		this.debug = true;
-		return this;
+	setLogSink(sink: ((event: LogEvent, args: unknown[]) => void) | null): void {
+		this.logSink = sink;
 	}
 
 	/**
-	 * Disable debug-level logging.
-	 * @returns {Fch} Current instance for chaining.
+	 * Emit one event. No-ops when no sink is installed, so the core pays nothing
+	 * for logging unless the plugin is attached.
+	 *
+	 * @internal
 	 */
-	disableLogging(): this {
-		this.debug = false;
-		return this;
-	}
-
-	/**
-	 * Replace the logger implementation. The value is validated the same way as
-	 * the constructor option, so an incomplete logger cannot silently swallow logs.
-	 * @param {Logger} logger - New logger.
-	 * @returns {Fch} Current instance for chaining.
-	 */
-	setLogger(logger: Logger): this {
-		this.logger = this.adaptLogger(logger);
-		return this;
-	}
-
-	/**
-	 * Returns a logger wrapper. `error` and `warn` always emit; `info` and `debug`
-	 * are suppressed unless debug logging is enabled.
-	 * @returns {Logger} Wrapped logger.
-	 */
-	getLogger(): Logger {
-		// Thin wrappers over the private {@link Fch.log}; the debug-aware
-		// gating lives in exactly one place.
-		return {
-			info: (...args) => this.log('info', ...args),
-			warn: (...args) => this.log('warn', ...args),
-			error: (...args) => this.log('error', ...args),
-			debug: (...args) => this.log('debug', ...args),
-		};
-	}
-
-	/**
-	 * `error`/`warn` are always emitted — diagnostics must not depend on the
-	 * debug flag. `info`/`debug` are chatty and stay opt-in.
-	 */
-	private shouldLog(level: keyof Logger): boolean {
-		if (level === 'error' || level === 'warn') return true;
-		return this.debug;
-	}
-
-	private log(level: keyof Logger, ...args: unknown[]) {
-		if (!this.shouldLog(level)) return;
-		const fn = this.logger[level];
-		if (typeof fn === 'function') (fn as (...a: unknown[]) => void)(...args);
+	emit(event: LogEvent, ...args: unknown[]): void {
+		this.logSink?.(event, args);
 	}
 
 	// ============================================================
@@ -1531,7 +1491,7 @@ export class Fch extends URL {
 		if (dedupeKey !== null) {
 			const existing = this.inFlight.get(dedupeKey);
 			if (existing) {
-				this.log('debug', 'Deduped concurrent in-flight request:', dedupeKey);
+				this.emit('dedupe', dedupeKey);
 				// Clone as soon as the shared response settles, so a late joiner
 				// can never race the first caller's body read.
 				return existing.then((response) => response.clone());
@@ -1581,7 +1541,7 @@ export class Fch extends URL {
 					throw new TypeError('Cannot retry requests with ReadableStream body. Set retries to 0.');
 				}
 
-				this.log('info', `Making request to ${snapshot.url} with method ${snapshot.method}`);
+				this.emit('request', snapshot.url, snapshot.method);
 
 				const timeoutController = new AbortController();
 				let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -1629,7 +1589,7 @@ export class Fch extends URL {
 						: false;
 
 					if (shouldRetry && attempt < totalAttempts) {
-						this.log('warn', `Retry triggered for status ${response.status}`);
+						this.emit('retry', response.status);
 						await this.sleepWithJitter(retryTimeout, attempt, master);
 						continue;
 					}
@@ -1646,11 +1606,11 @@ export class Fch extends URL {
 					} catch (error) {
 						interceptorError = true;
 						const errMsg = error instanceof Error ? error.message : String(error);
-						this.log('error', `Response interceptor failed:`, errMsg);
+						this.emit('interceptor-error', errMsg);
 						throw error;
 					}
 
-					this.log('info', `Received response with status ${response.status}`);
+					this.emit('response', response.status);
 					return processed;
 				} catch (error) {
 					if (timeoutId) clearTimeout(timeoutId);
@@ -1671,7 +1631,7 @@ export class Fch extends URL {
 
 					lastError = error;
 					const errMsg = error instanceof Error ? error.message : String(error);
-					this.log('error', `Request failed (attempt ${attempt}):`, errMsg);
+					this.emit('failure', attempt, errMsg);
 
 					if (isUserAbort) throw error;
 
@@ -1854,7 +1814,7 @@ export class Fch extends URL {
 			// (`Request failed (attempt N)`), and a second [ERROR] line for the
 			// same error only doubles the noise. Logging happens here rather
 			// than eagerly, since `.catch()` is also used on successful requests.
-			this.log('debug', 'Caught an error during the request:', error);
+			this.emit('caught', error);
 			if (!onRejected) throw error;
 			return onRejected(error);
 		});
@@ -1981,7 +1941,6 @@ export class Fch extends URL {
 		clone.dedupe = this.dedupe;
 		clone.dedupeKey = this.dedupeKey;
 		clone.retryOn = this.retryOn;
-		clone.logger = this.logger;
 		clone.requestInterceptors = [...this.requestInterceptors];
 		clone.responseInterceptors = [...this.responseInterceptors];
 
@@ -2006,7 +1965,7 @@ export class Fch extends URL {
 			// Copy the bytes; the original buffer may be reused by the caller.
 			clone.setBody(structuredClone(body), contentType);
 		} else if (body) {
-			this.log('warn', 'Cannot clone non-serializable body');
+			this.emit('clone-warning');
 		}
 
 		return clone;

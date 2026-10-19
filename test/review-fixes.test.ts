@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { server } from "./msw/server";
+import { logger as loggerPlugin } from "../src/plugins/logger";
 import { Fch, type Logger } from "../src/Fch";
 
 const B = "https://api.example.com";
@@ -288,10 +289,9 @@ describe("H4 — invalid logger falls back instead of swallowing logs", () => {
 			logs.push(a);
 		});
 
-		const req = new Fch(`${B}/x`, {
-			debug: true,
-			logger: { info: "not-a-function" } as unknown as Logger,
-		});
+		const req = new Fch(`${B}/x`).use(
+			loggerPlugin({ debug: true, logger: { info: "not-a-function" } as unknown as Logger }),
+		);
 		req.getLogger().info("hello");
 
 		spy.mockRestore();
@@ -300,7 +300,7 @@ describe("H4 — invalid logger falls back instead of swallowing logs", () => {
 
 	test("a valid logger is used as-is", () => {
 		const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-		const req = new Fch(`${B}/x`, { debug: true, logger });
+		const req = new Fch(`${B}/x`).use(loggerPlugin({ logger, debug: true }));
 		req.getLogger().info("kept");
 		expect(logger.info).toHaveBeenCalledWith("kept");
 	});
@@ -311,7 +311,7 @@ describe("H4 — invalid logger falls back instead of swallowing logs", () => {
 			logs.push(a);
 		});
 
-		const req = new Fch(`${B}/x`, { debug: true });
+		const req = new Fch(`${B}/x`).use(loggerPlugin({ debug: true }));
 		req.setLogger({ info: "broken" } as unknown as Logger);
 		req.getLogger().info("via default");
 
@@ -323,7 +323,7 @@ describe("H4 — invalid logger falls back instead of swallowing logs", () => {
 describe("H5 — error/warn logging is not gated by the debug flag", () => {
 	test("logger.error emits with debug disabled", () => {
 		const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-		const req = new Fch(`${B}/x`, { logger, debug: false });
+		const req = new Fch(`${B}/x`).use(loggerPlugin({ logger, debug: false }));
 
 		req.getLogger().error("boom");
 
@@ -332,7 +332,7 @@ describe("H5 — error/warn logging is not gated by the debug flag", () => {
 
 	test("logger.warn emits with debug disabled, info stays quiet", () => {
 		const logger: Logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
-		const req = new Fch(`${B}/x`, { logger, debug: false });
+		const req = new Fch(`${B}/x`).use(loggerPlugin({ logger, debug: false }));
 
 		req.getLogger().warn("careful");
 		req.getLogger().info("chatty");
@@ -347,7 +347,7 @@ describe("H5 — error/warn logging is not gated by the debug flag", () => {
 			throw new Error("network down");
 		});
 
-		const req = new Fch(`${B}/boom`, { logger, retries: 0 });
+		const req = new Fch(`${B}/boom`, { retries: 0 }).use(loggerPlugin({ logger }));
 		await req.makeRequest().catch(() => {});
 
 		expect(logger.error).toHaveBeenCalled();

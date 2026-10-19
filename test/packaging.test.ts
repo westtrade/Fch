@@ -216,6 +216,42 @@ describe("published package", () => {
 		expect(out.retryDelay).toBe(900);
 	});
 
+	test("the logger plugin resolves and restores the API", async () => {
+		const app = join(workdir, "app");
+		const script = join(app, "logger.mjs");
+		writeFileSync(
+			script,
+			`
+			import logger, { consoleLogger } from "@westtrade/fch/plugins/logger";
+			import { Fch } from "@westtrade/fch";
+
+			const calls = [];
+			const spy = { info: (...a) => calls.push(["i", ...a]), warn: (...a) => calls.push(["w", ...a]), error: () => {}, debug: () => {} };
+
+			globalThis.fetch = async () => new Response("{}", { status: 200 });
+
+			const bare = new Fch("https://x.test/y");
+			const withPlugin = new Fch("https://x.test/y").use(logger({ logger: spy, debug: true }));
+			await withPlugin.send();
+
+			console.log(JSON.stringify({
+				consoleLogger: typeof consoleLogger,
+				absentInCore: typeof bare.getLogger === "undefined",
+				presentWithPlugin: typeof withPlugin.getLogger === "function",
+				lines: calls.length,
+				first: calls[0] && calls[0][1],
+			}));
+			`,
+		);
+
+		const out = JSON.parse(run(app, [script]).trim().split("\n").pop()!);
+		expect(out.consoleLogger).toBe("function");
+		expect(out.absentInCore).toBe(true);
+		expect(out.presentWithPlugin).toBe(true);
+		expect(out.lines).toBeGreaterThan(0);
+		expect(out.first).toContain("Making request");
+	});
+
 	test("CJS: require() of both entries works", () => {
 		const app = join(workdir, "app");
 		const script = join(app, "cjs.cjs");

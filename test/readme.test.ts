@@ -124,7 +124,6 @@ describe("Readme examples", () => {
 			"setRetryOn", "setFetchOptions", "setCORS", "disableCache",
 			"setDedupeKey",
 			"before", "after",
-			"getLogger", "setLogger", "enableLogging", "disableLogging",
 			"abort", "clone", "start",
 		];
 		for (const m of members) {

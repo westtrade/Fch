@@ -1,23 +1,48 @@
 # Logging
 
-`Fch` logs through a small pluggable interface. It is quiet by default: `warn`
-and `error` always emit, `info` and `debug` are opt-in.
-
-## Turn it on
+Logging is a plugin. The core only emits semantic events, so a request without
+the plugin pays nothing for logging and prints nothing.
 
 ```ts
-const req = new Fch("https://api.example.com/orders", {
-	retries: 2,
-	debug: true,
-});
+import { logger } from "@westtrade/fch/plugins/logger";
+
+const req = new Fch("https://api.example.com/orders", { retries: 2 })
+	.use(logger({ debug: true }));
 ```
 
-Or on an existing builder:
+It is quiet by default: `warn` and `error` always emit, `info` and `debug` need
+`debug: true`.
+
+## Why a plugin
+
+Twelve log calls sat inside the retry loop and cost every user ~1.1 kB of core
+they never used. Now the core calls `emit('retry', status)` and the plugin
+decides the level, the wording, and whether to print at all.
+
+Without the plugin, logging is a no-op — no console noise, no crash.
+
+## Configure
+
+```ts
+// a custom logger
+req.use(logger({ logger: pinoLogger, debug: true }));
+
+// or console with the default [LEVEL] prefixes
+req.use(logger({ debug: true }));
+```
+
+The plugin adds the same four methods the core used to have, so existing call
+sites keep working:
 
 ```ts
 req.enableLogging();  // debug: true
 req.disableLogging(); // debug: false
+req.setLogger(pinoLogger);
+req.getLogger().info("…");
 ```
+
+`consoleLogger()` is exported for when you want the default implementation to
+wrap yourself.
 
 ## What gets logged
 

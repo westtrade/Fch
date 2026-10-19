@@ -35,6 +35,12 @@
 			"import": "./dist/plugins/compat.mjs",
 			"require": "./dist/plugins/compat.js",
 			"default": "./dist/plugins/compat.js"
+		},
+		"./plugins/logger": {
+			"types": "./dist/plugins/logger.d.ts",
+			"import": "./dist/plugins/logger.mjs",
+			"require": "./dist/plugins/logger.js",
+			"default": "./dist/plugins/logger.js"
 		}
 	},
 	"scripts": {

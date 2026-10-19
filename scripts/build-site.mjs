@@ -62,7 +62,7 @@ const NAV = [
 		title: 'Operating',
 		items: [
 			{ slug: 'hooks', title: 'Interceptors', blurb: 'before() / after(), per attempt.' },
-			{ slug: 'logging', title: 'Logging', blurb: 'Pluggable logger, quiet by default.' },
+			{ slug: 'logging', title: 'Logging', blurb: 'A plugin: console, pino, or your own.' },
 			{ slug: 'api', title: 'API reference', blurb: 'Every method, every option.' },
 		],
 	},
