@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/westtrade/Fch/compare/v1.7.2...v1.8.0) (2026-10-19)
+
+
+### Features
+
+* allow a custom fetch implementation ([8e416e5](https://github.com/westtrade/Fch/commit/8e416e54f0d00c515177388f61540db93a936ffd))
+
 ## [1.7.2](https://github.com/westtrade/Fch/compare/v1.7.1...v1.7.2) (2026-10-19)
 
 
