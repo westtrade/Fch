@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/westtrade/Fch/compare/v1.11.0...v1.12.0) (2026-10-19)
+
+
+### Features
+
+* **validate:** validate the FormData before sending, not just the response ([51d9fd7](https://github.com/westtrade/Fch/commit/51d9fd7df1d25c19a9b79670a7eec69d1d0bb03f))
+
 # [1.11.0](https://github.com/westtrade/Fch/compare/v1.10.0...v1.11.0) (2026-10-19)
 
 
