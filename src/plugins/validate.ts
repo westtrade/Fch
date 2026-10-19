@@ -155,10 +155,10 @@ export function validate<T = unknown>(
 	maybeOptions?: ValidateOptions<T>,
 ): Plugin {
 	// Two call shapes:
-	//   validate('response', rules)  — explicit target (recommended)
-	//   validate(rules)              — the original response-only form
+	//   validate('formData', rules)  — explicit, always unambiguous
+	//   validate(rules)              — defaults to 'formData', the common case
 	const target: ValidationTarget =
-		typeof targetOrOptions === 'string' ? targetOrOptions : 'response';
+		typeof targetOrOptions === 'string' ? targetOrOptions : 'formData';
 	const options: ValidateOptions<T> =
 		typeof targetOrOptions === 'string'
 			? (maybeOptions ?? {})
@@ -191,10 +191,15 @@ function formDataPlugin<T>(options: ValidateOptions<T>): Plugin {
 
 		install({ onRequest }: PluginApi): void {
 			onRequest((request) => {
-				// Only a form body can be validated here: a JSON or binary body is
-				// not FormData, and there is nothing to check field by field.
+				// Only a form body can be validated here. A JSON or binary payload is
+				// not FormData. Since 'formData' is the DEFAULT target, skipping
+				// silently would let a caller believe the response was checked, so
+				// this is reported through the event the logger plugin prints.
 				const data = request.formData;
-				if (!data) return;
+				if (!data) {
+					request.emit('validate-skipped', `validate('formData')`, request.toString());
+					return;
+				}
 
 				const value = Object.fromEntries(
 					[...data.entries()].map(([key, entry]) => [

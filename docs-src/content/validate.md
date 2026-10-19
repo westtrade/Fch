@@ -12,9 +12,23 @@ Both turn a mismatch into a normal rejection, so it reaches `.catch()`, every
 network error.
 
 ```ts
-use(validate('formData', rules));   // before sending
-use(validate('response', rules));   // after receiving
+validate(rules)                     // formData — the default
+use(validate('formData', rules));   // explicit, same thing
+use(validate('response', rules));   // the reply, after it arrives
 ```
+
+**The default is `'formData'`**, because validating a form before it is sent is
+the more common case: it stops bad data at the network boundary.
+
+> **Careful with a JSON body.** `'formData'` has nothing to check on a JSON or
+> binary payload, so it **skips** rather than fails. With the
+> [logger](logging.md) attached, that skip is printed:
+>
+> ```text
+> [WARN] validate('formData') skipped: no form body on https://api.example.com/x
+> ```
+>
+> If you meant to validate a reply, say so: `validate('response', rules)`.
 
 Need both? Attach both. Each target registers as a separate plugin
 (`validate:formData`, `validate:response`), so two `use()` calls coexist.
@@ -25,8 +39,8 @@ const req = new Fch("https://api.example.com/houses", { method: "POST" })
 	.use(validate("response", { schema: houseSchema }));
 ```
 
-`validate(rules)` without a target still means `'response'`, so existing code
-keeps working.
+A bare `validate(rules)` means `'formData'`. Pass the target explicitly whenever
+the intent is not obvious, especially for `'response'`.
 
 ```ts
 import { Fch } from "@westtrade/fch";

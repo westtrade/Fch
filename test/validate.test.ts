@@ -37,7 +37,7 @@ describe("validate plugin", () => {
 		globalThis.fetch = json({ id: 1, name: "Ann" });
 
 		const [house] = await new Fch("https://api.example.com/x")
-			.use(validate({ schema: houseSchema }))
+			.use(validate('response', { schema: houseSchema }))
 			.json<{ id: number; name: string }>();
 
 		expect(house).toEqual({ id: 1, name: "Ann" });
@@ -47,7 +47,7 @@ describe("validate plugin", () => {
 		globalThis.fetch = json({ id: "nope", extra: true });
 
 		const error = await new Fch("https://api.example.com/x")
-			.use(validate({ schema: houseSchema }))
+			.use(validate('response', { schema: houseSchema }))
 			.json()
 			.catch((e: unknown) => e);
 
@@ -66,7 +66,7 @@ describe("validate plugin", () => {
 	test("the message names the first problem", async () => {
 		globalThis.fetch = json({});
 		const error = (await new Fch("https://api.example.com/x")
-			.use(validate({ schema: houseSchema }))
+			.use(validate('response', { schema: houseSchema }))
 			.json()
 			.catch((e: unknown) => e)) as ValidationError;
 
@@ -79,7 +79,7 @@ describe("validate plugin", () => {
 	test("the raw response and body are on the error", async () => {
 		globalThis.fetch = json({ id: 1 });
 		const error = (await new Fch("https://api.example.com/x")
-			.use(validate({ schema: houseSchema }))
+			.use(validate('response', { schema: houseSchema }))
 			.json()
 			.catch((e: unknown) => e)) as ValidationError;
 
@@ -90,7 +90,7 @@ describe("validate plugin", () => {
 	test("keepBody: false omits the body from the error", async () => {
 		globalThis.fetch = json({ id: 1 });
 		const error = (await new Fch("https://api.example.com/x")
-			.use(validate({ schema: houseSchema, keepBody: false }))
+			.use(validate('response', { schema: houseSchema, keepBody: false }))
 			.json()
 			.catch((e: unknown) => e)) as ValidationError;
 
@@ -110,7 +110,7 @@ describe("validate plugin", () => {
 
 		await new Fch("https://api.example.com/x")
 			.use(probe as never)
-			.use(validate({ schema: houseSchema }))
+			.use(validate('response', { schema: houseSchema }))
 			.json()
 			.catch(() => {});
 
@@ -124,7 +124,7 @@ describe("validate plugin", () => {
 
 		const error = await new Fch("https://api.example.com/x")
 			.use(
-				validate({
+				validate('response', {
 					validate: () => {
 						throw new ZodLike("name: Required");
 					},
@@ -143,7 +143,7 @@ describe("validate plugin", () => {
 		// AJV-shaped: `ajv.validate(schema, body) || ajv.errors`.
 		const error = await new Fch("https://api.example.com/x")
 			.use(
-				validate({
+				validate('response', {
 					validate: () => [
 						{ instancePath: "/name", message: "must have required property 'name'" },
 					],
@@ -164,7 +164,7 @@ describe("validate plugin", () => {
 
 		for (const valid of [undefined, true, null, []]) {
 			const [house] = await new Fch("https://api.example.com/x")
-				.use(validate({ validate: () => valid }))
+				.use(validate('response', { validate: () => valid }))
 				.json<{ id: number }>();
 			expect(house.id).toBe(1);
 		}
@@ -174,7 +174,7 @@ describe("validate plugin", () => {
 		globalThis.fetch = json({ id: 1 });
 
 		const error = (await new Fch("https://api.example.com/x")
-			.use(validate({ validate: () => false }))
+			.use(validate('response', { validate: () => false }))
 			.json()
 			.catch((e: unknown) => e)) as ValidationError;
 
@@ -186,7 +186,7 @@ describe("validate plugin", () => {
 
 		// Skip everything: nothing should throw.
 		const [body] = await new Fch("https://api.example.com/x")
-			.use(validate({ schema: houseSchema, when: () => false }))
+			.use(validate('response', { schema: houseSchema, when: () => false }))
 			.json<{ nope: boolean }>();
 
 		expect(body.nope).toBe(true);
@@ -198,7 +198,7 @@ describe("validate plugin", () => {
 		let called = false;
 		const [body] = await new Fch("https://api.example.com/x")
 			.use(
-				validate({
+				validate('response', {
 					schema: houseSchema, // would fail
 					validate: () => {
 						called = true;
@@ -212,7 +212,7 @@ describe("validate plugin", () => {
 	});
 
 	test("requires a schema or a validate function", () => {
-		expect(() => validate({})).toThrow(/needs a `schema`.*or a `validate\(value, response\?\)`/);
+		expect(() => validate('response', {})).toThrow(/needs a `schema`.*or a `validate\(value, response\?\)`/);
 		expect(() => validate("formData", {})).toThrow(/validate\('formData'/);
 	});
 
@@ -225,7 +225,7 @@ describe("validate plugin", () => {
 	test("the target defaults to response (back-compatible call)", async () => {
 		globalThis.fetch = json({ id: 1 });
 
-		const req = new Fch("https://api.example.com/x").use(validate({ schema: houseSchema }));
+		const req = new Fch("https://api.example.com/x").use(validate('response', { schema: houseSchema }));
 		expect(req.plugins).toEqual(["validate:response"]);
 
 		const error = (await req.json().catch((e: unknown) => e)) as ValidationError;

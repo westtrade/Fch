@@ -65,7 +65,9 @@ export type LogEvent =
 	/** An error was caught by `.catch()`: `(error)` */
 	| 'caught'
 	/** A body could not be cloned: no arguments */
-	| 'clone-warning';
+	| 'clone-warning'
+	/** A plugin skipped its work: `(what, url)` — e.g. form validation on JSON */
+	| 'validate-skipped';
 
 /**
  * UI timer phase, mirroring Superforms' loading timers:

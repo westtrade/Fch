@@ -163,7 +163,9 @@ describe("published package", () => {
 			const out = { same: typeof validate === "function", issues: checkSchema(1, { type: "string" }, "").length };
 
 			const req = new Fch("https://x.test/y").use(
-				validate({ schema: { type: "object", required: ["id"], properties: { id: { type: "number" } } } }),
+				validate("response", {
+					schema: { type: "object", required: ["id"], properties: { id: { type: "number" } } },
+				}),
 			);
 
 			try {

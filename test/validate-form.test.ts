@@ -2,6 +2,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { Fch } from "../src/Fch";
 import { validate, ValidationError } from "../src/plugins/validate";
+import { logger } from "../src/plugins/logger";
 
 // Validating the request body must stop the request before it is sent, and the
 // failure must behave like any other rejection.
@@ -174,5 +175,50 @@ describe("validate('formData')", () => {
 			.catch((e: unknown) => e)) as ValidationError;
 
 		expect(error.body).toBeUndefined();
+	});
+});
+
+describe("the default target", () => {
+	test("validate(rules) means formData", () => {
+		const req = new Fch("https://api.example.com/x").use(
+			validate({ schema: { type: "object" } }),
+		);
+
+		expect(req.plugins).toEqual(["validate:formData"]);
+	});
+
+	test("an invalid form rejects under the default", async () => {
+		const req = new Fch("https://api.example.com/x").use(validate({ schema }));
+
+		const error = (await req
+			.setFormData("#bad")
+			.send()
+			.catch((e: unknown) => e)) as ValidationError;
+
+		expect(error).toBeInstanceOf(ValidationError);
+		expect(error.target).toBe("formData");
+		expect(sent).toBe(0);
+	});
+
+	test("a JSON request skips form validation instead of failing", async () => {
+		// The hazard of a formData default: a JSON body has no fields to check.
+		// It must not reject, but it must not look validated either — the skip is
+		// reported through the logger.
+		const warnings: string[] = [];
+		const spy = {
+			info: () => {},
+			error: () => {},
+			debug: () => {},
+			warn: (...args: unknown[]) => warnings.push(args.join(" ")),
+		};
+
+		const req = new Fch("https://api.example.com/x", { method: "POST" })
+			.use(logger({ logger: spy }))
+			.use(validate({ schema }));
+
+		await req.setJsonBody({ anything: true }).send();
+
+		expect(sent).toBe(1);
+		expect(warnings.join(" ")).toContain("skipped");
 	});
 });

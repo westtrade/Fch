@@ -86,8 +86,9 @@ const req = new Fch(url).use(nanostores());
 req.get();          // { loading, data, error, timer, delayed, timedOut, response }
 await req.json();
 
-// validation: 'formData' checks before sending, 'response' after receiving.
-// Attach both with two use() calls; omit the target for 'response'.
+// validation: 'formData' (the DEFAULT) checks before sending, 'response' after.
+// A bare validate(rules) means 'formData'; attach both with two use() calls.
+// Note: formData skips a JSON body (logged as a warning), it does not fail.
 new Fch(url)
   .use(validate("formData", { schema: { type: "object", required: ["name"] } }))
   .use(validate("response", { schema: { type: "object", required: ["id"] } }))
