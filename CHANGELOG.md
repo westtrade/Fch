@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/westtrade/Fch/compare/v1.3.0...v1.3.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **docs:** read the version badge from package.json ([3ea7573](https://github.com/westtrade/Fch/commit/3ea7573332d93275b5524fc78baaedcbd30799a4))
+
 # [1.3.0](https://github.com/westtrade/Fch/compare/v1.2.5...v1.3.0) (2026-10-19)
 
 
