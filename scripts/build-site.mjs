@@ -138,6 +138,7 @@ const ICONS = {
 	arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
 	check: '<path d="M20 6L9 17l-5-5"/>',
 	cross: '<path d="M18 6L6 18M6 6l12 12"/>',
+	star: '<path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1 6.2-5.5-2.9-5.5 2.9 1-6.2L3 9.6l6.2-.9z"/>',
 	github:
 		'<path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 00-.9-2.6c3-.3 6.2-1.5 6.2-6.8A5.3 5.3 0 0019.9 5 4.9 4.9 0 0019.8.6S18.6.2 16 1.9a13.4 13.4 0 00-7 0C6.4.2 5.2.6 5.2.6A4.9 4.9 0 005.1 5a5.3 5.3 0 00-1.4 3.7c0 5.3 3.2 6.5 6.2 6.8a3.4 3.4 0 00-.9 2.6V22"/>',
 }
@@ -174,6 +175,10 @@ const header = () => `
 		<span class="hidden text-slate-300 sm:inline">/</span>
 		<a href="getting-started.html" class="hidden text-sm text-slate-500 hover:text-slate-900 sm:inline">Docs</a>
 		<div class="ml-auto flex items-center gap-1">
+			<a href="${GITHUB}" class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm font-medium text-slate-700 transition hover:border-slate-400 hover:bg-slate-50" aria-label="Star Fch on GitHub">
+				<span class="text-amber-500">${icon(ICONS.star, 'h-4 w-4')}</span>
+				<span class="hidden sm:inline">Star</span>
+			</a>
 			<a href="${GITHUB}" class="hidden rounded-lg px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 hover:text-slate-900 sm:inline">GitHub</a>
 			<a href="${GITHUB}" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-slate-900" aria-label="GitHub">${icon(ICONS.github)}</a>
 			<button type="button" class="rounded-lg p-2 text-slate-600 hover:bg-slate-100 lg:hidden" x-on:click="nav = !nav" :aria-expanded="nav" aria-controls="mobile-nav" aria-label="Menu">

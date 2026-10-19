@@ -25,7 +25,7 @@
 		"size": "size-limit",
 		"site": "npm run build && node scripts/build-demo-bundle.mjs && node scripts/build-site.mjs && node scripts/build-site-css.mjs",
 		"site:serve": "python3 -m http.server 8765 --directory site",
-		"site:check": "node scripts/check-all.mjs && node scripts/check-visual.mjs && node scripts/check-interactions.mjs && node scripts/check-file-protocol.mjs",
+		"site:check": "node scripts/check-all.mjs && node scripts/check-visual.mjs && node scripts/check-interactions.mjs && node scripts/check-file-protocol.mjs && node scripts/check-star-cta.mjs",
 		"prepublishOnly": "npm run build",
 		"prepare": "npm run build",
 		"site:check:subpath": "node scripts/check-subpath.mjs",
