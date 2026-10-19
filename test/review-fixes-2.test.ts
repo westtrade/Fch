@@ -698,3 +698,73 @@ describe("B24 — the baseURL alias keeps working from one place", () => {
 		expect(Object.keys(seen[0])).not.toContain("baseUrl");
 	});
 });
+
+// ---------------------------------------------------------------- B25
+
+describe("B25 — setFetchOptions({ signal }) actually cancels the request", () => {
+	test("aborting that signal rejects the in-flight request", async () => {
+		globalThis.fetch = vi.fn(((_url: string, init: RequestInit) => {
+			return new Promise((_resolve, reject) =>
+				init.signal?.addEventListener("abort", () =>
+					reject(new DOMException("aborted", "AbortError"))
+				)
+			);
+		}) as unknown as typeof fetch);
+
+		const controller = new AbortController();
+		const req = new Fch(`${B}/x`).setFetchOptions({ signal: controller.signal });
+
+		const pending = req.send().catch((error) => error);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		controller.abort();
+
+		const outcome = await pending;
+		expect(outcome).toBeInstanceOf(DOMException);
+		expect((outcome as DOMException).name).toBe("AbortError");
+	});
+});
+
+// ---------------------------------------------------------------- B26
+
+describe("B26 — the eager request hands each caller its own clone", () => {
+	test("two concurrent sends can both read the body", async () => {
+		globalThis.fetch = vi.fn(async () => ok()) as unknown as typeof fetch;
+
+		const req = new Fch(`${B}/x`).start();
+		const [a, b] = await Promise.all([req.send(), req.send()]);
+
+		expect(a).not.toBe(b);
+		await expect(a.text()).resolves.toBe('{"ok":true}');
+		await expect(b.text()).resolves.toBe('{"ok":true}');
+	});
+});
+
+// ---------------------------------------------------------------- B27
+
+describe("B27 — poll() stops cleanly when aborted during its interval", () => {
+	test("the generator completes instead of throwing", async () => {
+		globalThis.fetch = vi.fn(async () => ok()) as unknown as typeof fetch;
+
+		const req = new Fch(`${B}/x`);
+		const iterator = req.poll(200);
+		await iterator.next();
+
+		// Abort while the generator is sleeping between polls.
+		setTimeout(() => req.abort(), 20);
+
+		const next = await iterator.next();
+		expect(next.done).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------- B28
+
+describe("B28 — the constructor validates timeout like setTimeout()", () => {
+	test("a negative timeout is rejected", () => {
+		expect(() => new Fch(B, { timeout: -1 })).toThrow(/Invalid timeout/);
+	});
+
+	test("zero still disables the timeout", () => {
+		expect(new Fch(B, { timeout: 0 }).timeout).toBe(0);
+	});
+});

@@ -285,10 +285,14 @@ export class Fch extends URL {
 	private dedupe = false;
 	private dedupeKey: string | (() => string) | null = null;
 	private maxRetryDelay = 30000;
-	private externalSignal?: AbortSignal;
 
 	/** User-supplied external signal. Never refreshed (unlike our own controller). */
 	private userSignal?: AbortSignal;
+
+	/** The caller's signal if given, else our own controller's (which `abort()` refreshes). */
+	private get externalSignal(): AbortSignal {
+		return this.userSignal ?? this.controller.signal;
+	}
 
 	/** True when `abortController` was not supplied and we created the controller. */
 	private ownsController = true;
@@ -381,11 +385,15 @@ export class Fch extends URL {
 		this.retries = retries;
 		this.retryDelay = retryDelay ?? retryTimeout ?? 1000;
 		this.maxRetryDelay = maxRetryDelay;
+		// Same rule as setTimeout(): a negative or NaN timeout is a mistake, not
+		// a way to disable the timeout (use 0 for that).
+		if (!Number.isFinite(timeout) || timeout < 0) {
+			throw new Error(`Invalid timeout: ${timeout}`);
+		}
 		this.timeout = timeout;
 		this.controller = abortController || new AbortController();
 		this.ownsController = !abortController;
 		this.userSignal = signal ?? undefined;
-		this.externalSignal = signal ?? this.controller.signal;
 
 		this.logger = this.adaptLogger(logger);
 		this.debug = debug;
@@ -513,7 +521,7 @@ export class Fch extends URL {
 	 * api.setSearchParams({ key: 'value', page: 1 });
 	 */
 	setSearchParams(params: Record<string, string | number | boolean>): this {
-		for (const key of [...this.searchParams.keys()]) this.searchParams.delete(key);
+		this.search = '';
 		for (const [key, value] of Object.entries(params)) {
 			this.searchParams.set(key, String(value));
 		}
@@ -1048,7 +1056,11 @@ export class Fch extends URL {
 		// `req.json()`, `req.send()` etc. all observe the SAME request instead of
 		// firing a new one.
 		const eager = this.eagerRequest;
-		if (eager) return eager;
+		// Each caller gets its own clone: a Response body can be read once, so
+		// two awaits of a memoised request would otherwise race and the second
+		// body read would fail with "Body is unusable". The dedupe path below
+		// clones for the same reason.
+		if (eager) return eager.then((response) => response.clone());
 
 		return this.executeRequest(this.retries, this.retryDelay);
 	}
@@ -1068,7 +1080,6 @@ export class Fch extends URL {
 		if (this.masterController.signal.aborted) {
 			this.masterController = new AbortController();
 			if (this.ownsController) this.controller = new AbortController();
-			this.externalSignal = this.userSignal ?? this.controller.signal;
 		}
 
 		// A new request clears the previous request's timeout state. Only this
@@ -1084,7 +1095,11 @@ export class Fch extends URL {
 		// same instance must not observe each other's controllers when one of
 		// them is aborted or when `abort()` later swaps in a new generation.
 		const master = this.masterController;
-		const external = this.externalSignal;
+		// `signal` may arrive through the constructor OR through
+		// `setFetchOptions({ signal })`; both must cancel the request. The
+		// fetchOptions one used to be overwritten by the combined signal below,
+		// so it silently did nothing.
+		const external = this.fetchOptions.signal ?? this.externalSignal;
 
 		const totalAttempts = retries + 1;
 
@@ -1094,23 +1109,17 @@ export class Fch extends URL {
 		const callMethod = (this.fetchOptions.method as string) || 'GET';
 		const callUrl = this.toString();
 
-		// Resolve the idempotency/dedupe key AT MOST ONCE per request. A factory
-		// key must yield the same value for the `Idempotency-Key` header and for
-		// the dedupe identity, otherwise retries of one logical request would be
-		// sent with different keys.
-		let cachedKey: string | null | undefined;
-		const resolveKey = (): string | null => {
-			if (cachedKey === undefined) {
-				cachedKey = !this.dedupeKey
-					? null
-					: typeof this.dedupeKey === 'function'
-						? this.dedupeKey()
-						: this.dedupeKey;
-			}
-			return cachedKey;
-		};
+		// Resolve the idempotency/dedupe key once per request. A factory key must
+		// yield the same value for the `Idempotency-Key` header and for the dedupe
+		// identity, otherwise retries of one logical request would be sent with
+		// different keys. Eager on purpose: the value is needed for every attempt.
+		const explicitKey: string | null = !this.dedupeKey
+			? null
+			: typeof this.dedupeKey === 'function'
+				? this.dedupeKey()
+				: this.dedupeKey;
 
-		const dedupeKey = this.resolveDedupeKey(callMethod, callUrl, resolveKey);
+		const dedupeKey = this.resolveDedupeKey(callMethod, callUrl, explicitKey);
 
 		if (dedupeKey !== null) {
 			const existing = this.inFlight.get(dedupeKey);
@@ -1134,9 +1143,6 @@ export class Fch extends URL {
 					// the instance itself and start another request — recursively,
 					// until the heap dies. Only await genuine promises.
 					const result: unknown = interceptor(this);
-					// Fch itself is thenable; only await native promises returned by
-					// async hooks. Awaiting arbitrary thenables here can invoke Fch.then()
-					// and recursively start another request.
 					if (
 						result !== (this as unknown) &&
 						result &&
@@ -1157,7 +1163,7 @@ export class Fch extends URL {
 				};
 
 				// Apply Idempotency-Key to snapshot headers (does not mutate this.headers)
-				this.applyIdempotencyKey(snapshot, resolveKey());
+				this.applyIdempotencyKey(snapshot, explicitKey);
 
 				// Replayability check — fatal only when a retry could follow.
 				if (
@@ -1297,7 +1303,7 @@ export class Fch extends URL {
 	private resolveDedupeKey(
 		method: string,
 		url: string,
-		resolveKey: () => string | null
+		explicitKey: string | null
 	): string | null {
 		if (!this.dedupe) return null;
 
@@ -1306,7 +1312,7 @@ export class Fch extends URL {
 		}
 		if (MUTATING_METHODS.has(method as HttpMethod)) {
 			// Mutating without an explicit key — never dedupe.
-			return resolveKey();
+			return explicitKey;
 		}
 		return null;
 	}
@@ -1584,11 +1590,7 @@ export class Fch extends URL {
 			clone.setBody(body.slice(0, body.size, body.type), contentType);
 		} else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
 			// Copy the bytes; the original buffer may be reused by the caller.
-			const view = body instanceof ArrayBuffer ? new Uint8Array(body) : body;
-			clone.setBody(
-				new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength)),
-				contentType
-			);
+			clone.setBody(structuredClone(body), contentType);
 		} else if (body) {
 			this.log('warn', 'Cannot clone non-serializable body');
 		}
@@ -1623,7 +1625,13 @@ export class Fch extends URL {
 
 			// The poll interval is the caller's, not a retry backoff: `sleep()`
 			// keeps it exact instead of clamping it to `maxRetryDelay`.
-			await this.sleep(delay);
+			// An abort landing in this window rejects the sleep; that is a clean
+			// stop, not a failure, so it must not escape the generator.
+			try {
+				await this.sleep(delay);
+			} catch {
+				break;
+			}
 		}
 	}
 
@@ -1661,21 +1669,6 @@ export class Fch extends URL {
 	}
 }
 
-/**
- * Static factory for quick request creation.
- *
- * @static
- * @param {string|URL} url - Target URL.
- * @param {FetchRequestOptions} [options] - Request configuration.
- * @returns {Fch} New Fch instance.
- *
- * @example
- * const [users, res] = await fch('https://api.example.com/users', {
- *   timeout: 5000,
- *   retries: 2,
- *   dedupe: true,
- * }).setAuthToken(token).json<User[]>();
- */
 /** Plain factory; `fch` below is this function with `create()` attached. */
 const fchFn = (url: string | URL, options: FetchRequestOptions = {}): Fch => {
 	return new Fch(url, options);
@@ -1689,6 +1682,11 @@ export interface FchInstanceOptions extends FetchRequestOptions {
 	baseURL?: string;
 }
 
+/** True for a URL that carries its own scheme (`https:`, `data:`, `mailto:`). */
+function isAbsoluteUrl(url: string): boolean {
+	return /^[a-z][a-z0-9+.-]*:/i.test(url);
+}
+
 /**
  * Resolve `url` against an optional base, so `api.post('/houses', form)` works.
  *
@@ -1699,7 +1697,7 @@ export interface FchInstanceOptions extends FetchRequestOptions {
 function resolveUrl(url: string | URL, baseUrl?: string): string | URL {
 	if (baseUrl == null || url instanceof URL) return url;
 
-	if (!/^[a-z][a-z0-9+.-]*:/i.test(baseUrl) && !baseUrl.startsWith('//')) {
+	if (!isAbsoluteUrl(baseUrl) && !baseUrl.startsWith('//')) {
 		throw new TypeError(
 			`Fch requires an absolute \`baseUrl\`, got "${baseUrl}". ` +
 				`Pass a full URL, e.g. \`fch.create({ baseUrl: 'https://api.example.com' })\`.`
@@ -1707,7 +1705,7 @@ function resolveUrl(url: string | URL, baseUrl?: string): string | URL {
 	}
 
 	// Absolute URLs (with a scheme) ignore the base.
-	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return url;
+	if (isAbsoluteUrl(url)) return url;
 
 	if (url.startsWith('//')) {
 		// Protocol-relative: resolvable only against a base. Without one, leave
@@ -1724,7 +1722,7 @@ function resolveUrl(url: string | URL, baseUrl?: string): string | URL {
  * letting `fetch()` fail later with an opaque error, say exactly what is missing.
  */
 function assertAbsolute(url: string): void {
-	if (/^[a-z][a-z0-9+.-]*:/i.test(url)) return;
+	if (isAbsoluteUrl(url)) return;
 
 	if (url.startsWith('//')) {
 		throw new TypeError(
@@ -1962,17 +1960,14 @@ export function create(options: FchInstanceOptions = {}) {
 
 export type FchApi = ReturnType<typeof create>;
 
-/** The `fch` factory with the `create()` shorthand API attached. */
-export interface FchFactory {
-	(url: string | URL, options?: FetchRequestOptions): Fch;
-	create(options?: FchInstanceOptions): FchApi;
-}
-
 // `fch.create(...)` mirrors the ergonomics of the reference implementation without
 // giving up the URL-first behaviour of the class. `fch` is the factory WITH
 // `create()` — the same object as the default export — so named and default
 // imports expose an identical API.
-export const fch: FchFactory = Object.assign(fchFn, { create });
+export const fch = Object.assign(fchFn, { create });
+
+/** The shape of {@link fch}: the factory plus the `create()` shorthand API. */
+export type FchFactory = typeof fch;
 
 /** Deprecated alias; kept because the factory has always carried `create()`. */
 export { fch as fchWithCreate };
