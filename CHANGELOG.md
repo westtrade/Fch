@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/westtrade/Fch/compare/v1.5.0...v1.5.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **site:** make the tab header readable ([169deb0](https://github.com/westtrade/Fch/commit/169deb0a4315fdb177ca5d804b8f525ca2dfcde3))
+
 # [1.5.0](https://github.com/westtrade/Fch/compare/v1.4.0...v1.5.0) (2026-10-19)
 
 
