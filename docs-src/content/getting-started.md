@@ -17,15 +17,15 @@ Install straight from the [GitHub repository](https://github.com/westtrade/Fch),
 pinned to a release tag:
 
 ```bash
-npm install github:westtrade/Fch#v1.5.0
+npm install github:westtrade/Fch#v1.5.1
 ```
 
 Or with any other package manager:
 
 ```bash
-pnpm add github:westtrade/Fch#v1.5.0
-yarn add github:westtrade/Fch#v1.5.0
-bun add github:westtrade/Fch#v1.5.0
+pnpm add github:westtrade/Fch#v1.5.1
+yarn add github:westtrade/Fch#v1.5.1
+bun add github:westtrade/Fch#v1.5.1
 ```
 
 Either way it installs as `@westtrade/fch`, so that is what you import:
@@ -36,7 +36,7 @@ import { Fch } from "@westtrade/fch";
 
 Pinning the tag is worth it: without one, npm follows the default branch, which
 may contain unreleased changes. To track the latest release instead, drop the
-`#v1.5.0` suffix.
+`#v1.5.1` suffix.
 
 The package ships compiled `dist/` output, so a git install builds it for you
 via `prepare`. If you vendor the source instead, run `npm install && npm run
