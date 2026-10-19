@@ -66,6 +66,66 @@ fch`https://api.example.com/events`; // sent now, no await needed
 > To configure before sending, use the builder: `new Fch(url)` or
 > `fch.create().request(url)`. See [Shorthand API](shortcuts.md).
 
+## One tag per method
+
+Bare `fch\`…\`` is a `GET`. The method tags make the verb explicit and, for
+methods that carry a body, take the body first:
+
+```ts
+fch.get`https://api.example.com/users/1`;       // GET
+fch.head`https://api.example.com/users/1`;      // HEAD
+fch.options`https://api.example.com/users/1`;   // OPTIONS
+fch.delete`https://api.example.com/users/1`;    // DELETE
+fch.del`https://api.example.com/users/1`;       // same as delete
+
+fch.post({ name: "Ann" })`https://api.example.com/users`;    // POST + JSON
+fch.put({ name: "Ann" })`https://api.example.com/users/1`;   // PUT  + JSON
+fch.patch({ name: "Ann" })`https://api.example.com/users/1`; // PATCH + JSON
+```
+
+The body goes **before** the template because the template carries only the
+URL. One spelling, no second way to do it:
+
+```ts
+// right
+fch.post({ name: "Ann" })`https://api.example.com/users`;
+
+// wrong: the tag does not take a body after it
+// fch.post`https://api.example.com/users`({ name: "Ann" });
+```
+
+`del` exists alongside `delete` because `delete` reads awkwardly in a chain and
+is a reserved word elsewhere; both send a `DELETE`.
+
+### Bodies are inferred, like the shortcut API
+
+| Body | Sent as |
+| --- | --- |
+| plain object / array | `JSON.stringify` + `Content-Type: application/json` |
+| `<form>` element / submit `Event` | `FormData`, boundary left to the runtime |
+| `FormData`, `Blob`, `ArrayBuffer`, `ReadableStream`, `URLSearchParams` | untouched |
+| string | as-is, with no `Content-Type` imposed |
+
+```ts
+fch.post([{ id: 1 }, { id: 2 }])`https://api.example.com/batch`; // JSON array
+fch.put(blob)`https://api.example.com/upload`;                   // binary as-is
+fch.patch(form)`https://api.example.com/users/1`;                // multipart
+```
+
+An empty call (`fch.put(null)\`…\``) sends no body at all.
+
+### Typing
+
+The generic goes on the body call, before the template:
+
+```ts
+const [user] = await fch.get<User>`https://api.example.com/users/1`;
+const [created] = await fch.post<House>({ name: "Cottage" })`https://api.example.com/houses`;
+```
+
+The tag returns the same `FchCall`, so `await`, `.json()`, `.send()`,
+`.request` and `abort()` all work exactly as with the bare tag.
+
 ## Interpolation is encoded
 
 This is the reason to use the tag instead of a plain string. Every interpolated

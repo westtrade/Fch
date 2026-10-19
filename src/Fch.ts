@@ -1898,7 +1898,8 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
  * - plain object / array → JSON with `Content-Type: application/json`
  * - anything else → handed to `fetch()` as-is
  */
-function applyShortcutBody(request: Fch, body: FchBodyInput): void {
+/** Shared with the tagged-template entry point in `Fch.literal.ts`. */
+export function applyShortcutBody(request: Fch, body: FchBodyInput): void {
 	// Build the FormData once: `setFormData` would otherwise call `toFormData`
 	// again, reading the whole form a second time on every submit.
 	const formData = toFormData(body);

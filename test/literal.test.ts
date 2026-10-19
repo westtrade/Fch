@@ -122,3 +122,81 @@ describe("fch tagged template", () => {
 		expect(user.name).toBe("Alice");
 	});
 });
+
+describe("fch method tags", () => {
+	test("bodyless methods set the HTTP verb", async () => {
+		await fch.get`https://api.example.com/u/1`;
+		await fch.head`https://api.example.com/u/1`;
+		await fch.options`https://api.example.com/u/1`;
+		await fch.delete`https://api.example.com/u/1`;
+
+		expect(calls.map((c) => c.init.method)).toEqual(["GET", "HEAD", "OPTIONS", "DELETE"]);
+		for (const call of calls) expect(call.init.body ?? null).toBeNull();
+	});
+
+	test("del is an alias of delete", async () => {
+		await fch.delete`https://api.example.com/u/1`;
+		await fch.del`https://api.example.com/u/1`;
+
+		expect(calls).toHaveLength(2);
+		expect(calls[0].init.method).toBe("DELETE");
+		expect(calls[1].init.method).toBe("DELETE");
+		expect(calls[0].url).toBe(calls[1].url);
+	});
+
+	test("body-carrying methods take the body first, then the URL", async () => {
+		await fch.post({ name: "Ann" })`https://api.example.com/users`;
+		await fch.put({ name: "Ann" })`https://api.example.com/users/1`;
+		await fch.patch({ name: "Ann" })`https://api.example.com/users/1`;
+
+		expect(calls.map((c) => c.init.method)).toEqual(["POST", "PUT", "PATCH"]);
+		for (const call of calls) {
+			expect(call.init.body).toBe(JSON.stringify({ name: "Ann" }));
+			expect(new Headers(call.init.headers).get("Content-Type")).toBe("application/json");
+		}
+	});
+
+	test("arrays become JSON bodies too", async () => {
+		await fch.post([{ id: 1 }, { id: 2 }])`https://api.example.com/batch`;
+		expect(calls[0].init.body).toBe(JSON.stringify([{ id: 1 }, { id: 2 }]));
+	});
+
+	test("binary bodies are passed through untouched", async () => {
+		const blob = new Blob(["png"], { type: "image/png" });
+		await fch.put(blob)`https://api.example.com/upload`;
+
+		expect(calls[0].init.body).toBe(blob);
+		// No Content-Type is imposed: the Blob carries its own.
+		expect(new Headers(calls[0].init.headers).get("Content-Type")).toBeNull();
+	});
+
+	test("string bodies are sent as-is without a JSON content type", async () => {
+		await fch.patch("plain text")`https://api.example.com/raw`;
+		expect(calls[0].init.body).toBe("plain text");
+		expect(new Headers(calls[0].init.headers).get("Content-Type")).toBeNull();
+	});
+
+	test("method tags return the same call shape as the bare tag", async () => {
+		const call = fch.get`https://api.example.com/u/1`;
+
+		expect(call.request).toBeInstanceOf(Fch);
+		expect(typeof call.json).toBe("function");
+		expect(typeof call.send).toBe("function");
+
+		const [body] = await call;
+		expect(body).toEqual({ id: 1, name: "Alice" });
+	});
+
+	test("method tags still encode interpolations", async () => {
+		await fch.get`https://api.example.com/u/${"a/b"}`;
+		expect(calls[0].url).toBe("https://api.example.com/u/a%2Fb");
+
+		await fch.post({})`https://api.example.com/u/${"a/b"}`;
+		expect(calls[1].url).toBe("https://api.example.com/u/a%2Fb");
+	});
+
+	test("a method tag on a relative URL fails like the constructor", () => {
+		expect(() => fch.post({})`/users`).toThrow(/requires an absolute URL/);
+		expect(() => fch.get`/users`).toThrow(/requires an absolute URL/);
+	});
+});

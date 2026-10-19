@@ -254,6 +254,11 @@ import fch, { raw } from "@westtrade/fch/literal";
 await fch`https://api.example.com/users/1`;          // [body, Response]
 fch`https://api.example.com/users/1`.request;         // the Fch instance
 fch`https://api.example.com/users/${raw("1/posts")}`; // skip encoding
+
+// one tag per method; body first for methods that carry one
+fch.get`https://api.example.com/users/1`;
+fch.delete`https://api.example.com/users/1`;
+fch.post({ name: "Ann" })`https://api.example.com/users`;
 ```
 
 Interpolated values are URL-encoded. See [Tagged template](literal.md).
