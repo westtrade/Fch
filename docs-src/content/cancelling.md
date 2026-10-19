@@ -147,8 +147,9 @@ not cascade. See [Deduplication](dedupe.md) for the trade-off in detail.
 
 ## `poll()` and cancellation
 
-`poll()` is an async generator that repeats a request on an interval. It stops
-when its controller aborts or the instance is aborted:
+`poll()` is an async generator that repeats a request on an interval. See
+[Polling](polling.md) for the full story; cancellation is what matters here —
+it stops when its controller aborts or the instance is aborted:
 
 ```ts
 const controller = new AbortController();

@@ -70,6 +70,13 @@ await req.setFormData(form).send();      // element
 const shared = new Fch(url, { dedupe: true });
 await Promise.all([shared.json(), shared.json()]);  // 1 request on the wire
 
+// polling: an async generator; every iteration is a NEW request, and a failure
+// is yielded (not thrown) so the loop survives it
+for await (const res of new Fch(url).poll(1000, controller)) {
+  if (res instanceof Error) continue;
+  if ((await res.json()).done) break;
+}
+
 // per-call options without a chain
 await api.request("/houses/1", { retries: 5 }).json<House>();
 
@@ -131,6 +138,7 @@ Reliability:
 - [Timeouts](https://westtrade.github.io/Fch/docs/timeouts.html): per attempt, `timeout` vs `timeoutMs`
 - [Deduplication](https://westtrade.github.io/Fch/docs/dedupe.html): one request on the wire
 - [Cancelling](https://westtrade.github.io/Fch/docs/cancelling.html): abort and keep the builder
+- [Polling](https://westtrade.github.io/Fch/docs/polling.html): repeat a request, and when not to
 
 Working with DOM:
 

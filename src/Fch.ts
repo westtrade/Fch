@@ -1386,10 +1386,20 @@ export class Fch extends URL {
 	 * @throws {TypeError} When `retries > 0` and body is a ReadableStream.
 	 */
 	async makeRequest(): Promise<Response> {
-		// Plugin hooks wrap the WHOLE execution, so they fire once per caller
-		// regardless of retries, and cover every entry point (`await req`,
-		// `.json()`, `.send()`, shortcuts and the tagged template) because they
-		// all funnel through here.
+		// The eager memo belongs to `await req` / `.json()` / shortcuts: those
+		// must all observe ONE request. Polling is the opposite — every iteration
+		// needs a fresh one — so `poll()` calls `runWithHooks()` directly.
+		return this.runWithHooks(() => this.makeRequestInner());
+	}
+
+	/**
+	 * One full execution: timers, plugin hooks, the request, and settle.
+	 * Shared by {@link Fch.makeRequest} and {@link Fch.poll}, so a poll is a
+	 * normal execution and plugins see it.
+	 *
+	 * @param run - The request to perform.
+	 */
+	private async runWithHooks(run: () => Promise<Response>): Promise<Response> {
 		this.startTimers();
 
 		try {
@@ -1399,7 +1409,7 @@ export class Fch extends URL {
 			// left the timer stuck in `submitting` and skipped onError.
 			for (const hook of this.pluginHooks.request) hook(this);
 
-			const response = await this.makeRequestInner();
+			const response = await run();
 			if (this.pluginHooks.success.length) {
 				// Read a clone so the caller's body stays unconsumed.
 				const body = await parsePluginBody(response.clone());
@@ -1990,7 +2000,12 @@ export class Fch extends URL {
 	async *poll(delay = 300, abortController: AbortController = this.controller): AsyncGenerator<Response | Error> {
 		while (!abortController.signal.aborted && !this.masterController.signal.aborted) {
 			try {
-				const response = await this.executeRequest(this.retries, this.retryDelay);
+				// A full execution per iteration, so plugin hooks, the UI timers
+				// and the store see every poll — but without `makeRequest`'s eager
+				// memo, which would replay one request forever.
+				const response = await this.runWithHooks(() =>
+					this.executeRequest(this.retries, this.retryDelay),
+				);
 				yield response;
 			} catch (error) {
 				yield error as Error;

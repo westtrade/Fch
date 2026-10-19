@@ -351,8 +351,14 @@ describe("B13 — poll() uses the caller's interval, not a retry backoff", () =>
 	test("the poll delay is not clamped to maxRetryDelay", async () => {
 		globalThis.fetch = vi.fn(async () => ok()) as unknown as typeof fetch;
 
-		// timeout: 0 disables the per-request timer, so every setTimeout is the poll sleep.
-		const req = new Fch(`${B}/x`, { maxRetryDelay: 1000, timeout: 0 });
+		// Poll is a full execution now, so the UI timers also schedule setTimeout;
+		// disable them to leave only the poll sleep in `delays`.
+		const req = new Fch(`${B}/x`, {
+			maxRetryDelay: 1000,
+			timeout: 0,
+			delayMs: false,
+			timeoutMs: false,
+		});
 		const delays: number[] = [];
 		const realSetTimeout = globalThis.setTimeout;
 		(globalThis as unknown as { setTimeout: typeof setTimeout }).setTimeout = ((

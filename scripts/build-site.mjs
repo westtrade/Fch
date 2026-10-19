@@ -40,6 +40,7 @@ const NAV = [
 			{ slug: 'timeouts', title: 'Timeouts', blurb: 'Per attempt, per request, no leaked timers.' },
 			{ slug: 'dedupe', title: 'Deduplication', blurb: 'One request on the wire, many callers.' },
 			{ slug: 'cancelling', title: 'Cancelling', blurb: 'Abort in-flight work, keep the builder.' },
+			{ slug: 'polling', title: 'Polling', blurb: 'Repeat a request until the job is done.' },
 		],
 	},
 	{

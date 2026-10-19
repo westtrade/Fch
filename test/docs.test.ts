@@ -20,7 +20,7 @@ describe("documentation site", () => {
 	test("has the pages the navigation advertises", () => {
 		const expected = [
 			"getting-started", "vs-fetch", "vs-libraries", "url-first", "requests",
-			"reading-responses", "retries", "timeouts", "dedupe", "cancelling",
+			"reading-responses", "retries", "timeouts", "dedupe", "cancelling", "polling",
 			"forms", "shortcuts", "literal", "plugins", "nanostores", "validate", "hooks", "logging", "api",
 		];
 		expect(pages.map((p) => p.slug).sort()).toEqual(expected.sort());
