@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/westtrade/Fch/compare/v1.4.0...v1.5.0) (2026-10-19)
+
+
+### Features
+
+* **literal:** add per-method tags (get, head, options, delete/del, post, put, patch) ([2052c50](https://github.com/westtrade/Fch/commit/2052c50904d2f2f3d3dd9cd108dec790d5914381))
+
 # [1.4.0](https://github.com/westtrade/Fch/compare/v1.3.1...v1.4.0) (2026-10-19)
 
 
