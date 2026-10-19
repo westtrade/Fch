@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/westtrade/Fch/compare/v1.5.1...v1.6.0) (2026-10-19)
+
+
+### Features
+
+* add a plugin system and a Nano Stores integration ([5dc4af8](https://github.com/westtrade/Fch/commit/5dc4af83360cb041add8374d79591b407342ca6c))
+
 ## [1.5.1](https://github.com/westtrade/Fch/compare/v1.5.0...v1.5.1) (2026-10-19)
 
 
