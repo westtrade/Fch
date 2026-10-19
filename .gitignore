@@ -150,3 +150,7 @@ site/
 
 # Local npm cache used when installing offline
 .npmcache*/
+
+# Scratch dirs for ad-hoc probes
+.probe/
+.measure.mjs
