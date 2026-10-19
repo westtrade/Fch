@@ -22,6 +22,43 @@ export interface Logger {
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS';
 
 /**
+ * What a plugin may do with a request.
+ *
+ * A plugin receives the `Fch` instance and may:
+ * - register hooks with {@link PluginApi.onSuccess} / {@link PluginApi.onError},
+ * - mutate the request (headers, timeout, retries) in {@link PluginApi.onRequest},
+ * - attach per-instance state.
+ *
+ * `onSuccess` runs after the body is parsed, for every way of executing a
+ * request (`await req`, `.json()`, `.send()`, the shortcut API and the tagged
+ * template). `onError` runs for any rejection, including network errors,
+ * timeouts and thrown response interceptors.
+ */
+export interface Plugin {
+	/** Stable name, used by {@link Fch.use} to avoid registering twice. */
+	name: string;
+	/**
+	 * Called once per instance when the plugin is attached. Register hooks here.
+	 * Return value is ignored.
+	 */
+	install(api: PluginApi): void;
+}
+
+/** Passed to {@link Plugin.install}. */
+export interface PluginApi {
+	/** The instance being extended. */
+	request: Fch;
+	/** Run `fn` after a successful execution, with the parsed body. */
+	onSuccess(fn: (body: unknown, response: Response) => void): void;
+	/** Run `fn` when an execution rejects. */
+	onError(fn: (error: unknown) => void): void;
+	/** Run `fn` before the first attempt of each execution. */
+	onRequest(fn: (request: Fch) => void): void;
+	/** Per-instance storage shared by one plugin's hooks. */
+	state: Map<string, unknown>;
+}
+
+/**
  * Configuration options for fetch requests, extending standard RequestInit.
  *
  * @public
@@ -190,6 +227,25 @@ function buildFormData(form: FormLike, submitter: FormLike | null): FormData {
 }
 
 /** Base64-encode text as UTF-8 — `btoa` alone rejects non-Latin-1 characters. */
+/**
+ * Body for plugin hooks: JSON when the server says so, text otherwise. Reading
+ * never throws — a malformed body yields `null` rather than breaking a request
+ * that actually succeeded.
+ */
+async function parsePluginBody(response: Response): Promise<unknown> {
+	const contentType = response.headers.get('content-type') ?? '';
+	const text = await response.text();
+
+	if (contentType.includes('json')) {
+		try {
+			return text ? JSON.parse(text) : null;
+		} catch {
+			return null;
+		}
+	}
+	return text;
+}
+
 function base64Encode(text: string): string {
 	const bytes = new TextEncoder().encode(text);
 	let binary = '';
@@ -309,6 +365,19 @@ export class Fch extends URL {
 		error: unknown | null,
 		attempt: number
 	) => boolean;
+
+	/** Hooks contributed by plugins, run around every execution. */
+	private pluginHooks: {
+		success: ((body: unknown, response: Response) => void)[];
+		error: ((error: unknown) => void)[];
+		request: ((request: Fch) => void)[];
+	} = { success: [], error: [], request: [] };
+
+	/** Names of attached plugins, so `use()` is idempotent. */
+	private pluginNames = new Set<string>();
+
+	/** Per-plugin scratch space, keyed by plugin name. */
+	private pluginState = new Map<string, Map<string, unknown>>();
 
 	private requestInterceptors: ((request: Fch) => void | Promise<void>)[] = [];
 	private responseInterceptors: ((
@@ -969,6 +1038,44 @@ export class Fch extends URL {
 	}
 
 	// ============================================================
+	// Plugins
+	// ============================================================
+
+	/**
+	 * Attach a plugin to this instance. Idempotent: passing the same `name`
+	 * twice is a no-op, which matters for clients whose defaults are applied to
+	 * many instances.
+	 *
+	 * ```ts
+	 * req.use(storePlugin({ store: $house }));
+	 * ```
+	 *
+	 * @param plugin - Plugin to install.
+	 * @returns {Fch} Current instance for chaining.
+	 */
+	use(plugin: Plugin): this {
+		if (this.pluginNames.has(plugin.name)) return this;
+
+		this.pluginNames.add(plugin.name);
+		const state = new Map<string, unknown>();
+		this.pluginState.set(plugin.name, state);
+
+		plugin.install({
+			request: this,
+			state,
+			onSuccess: (fn) => this.pluginHooks.success.push(fn),
+			onError: (fn) => this.pluginHooks.error.push(fn),
+			onRequest: (fn) => this.pluginHooks.request.push(fn),
+		});
+		return this;
+	}
+
+	/** Names of the plugins attached to this instance. */
+	get plugins(): string[] {
+		return [...this.pluginNames];
+	}
+
+	// ============================================================
 	// Interceptors
 	// ============================================================
 
@@ -1052,6 +1159,31 @@ export class Fch extends URL {
 	 * @throws {TypeError} When `retries > 0` and body is a ReadableStream.
 	 */
 	async makeRequest(): Promise<Response> {
+		// Plugin hooks wrap the WHOLE execution, so they fire once per caller
+		// regardless of retries, and cover every entry point (`await req`,
+		// `.json()`, `.send()`, shortcuts and the tagged template) because they
+		// all funnel through here.
+		for (const hook of this.pluginHooks.request) hook(this);
+
+		try {
+			const response = await this.makeRequestInner();
+			if (this.pluginHooks.success.length) {
+				// Read a clone so the caller's body stays unconsumed.
+				const body = await parsePluginBody(response.clone());
+				for (const hook of this.pluginHooks.success) hook(body, response);
+			}
+			return response;
+		} catch (error) {
+			for (const hook of this.pluginHooks.error) hook(error);
+			throw error;
+		}
+	}
+
+	/**
+	 * The request itself, without plugin hooks. Split out so plugin failures
+	 * cannot recurse into the same hook chain.
+	 */
+	private async makeRequestInner(): Promise<Response> {
 		// A request started by `start()` (or a shortcut) is reused, so `await req`,
 		// `req.json()`, `req.send()` etc. all observe the SAME request instead of
 		// firing a new one.

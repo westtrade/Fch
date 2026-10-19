@@ -11,6 +11,7 @@ const root = resolve(import.meta.dirname, '..')
 const dist = resolve(root, 'dist')
 
 mkdirSync(dist, { recursive: true })
+mkdirSync(resolve(dist, 'plugins'), { recursive: true })
 
 writeFileSync(
 	resolve(dist, 'Fch.mjs'),
@@ -41,4 +42,15 @@ export default mod.fch
 `,
 )
 
-console.log('dist/Fch.mjs and dist/Fch.literal.mjs written')
+writeFileSync(
+	resolve(dist, 'plugins/nanostores.mjs'),
+	`// ESM wrapper around the CommonJS build (generated).
+import mod from './nanostores.js'
+
+export const nanostores = mod.nanostores
+
+export default mod.nanostores
+`,
+)
+
+console.log('dist/Fch.mjs, dist/Fch.literal.mjs and dist/plugins/nanostores.mjs written')

@@ -51,6 +51,13 @@ const NAV = [
 		],
 	},
 	{
+		title: 'Extending',
+		items: [
+			{ slug: 'plugins', title: 'Plugins', blurb: 'use() and the plugin contract.' },
+			{ slug: 'nanostores', title: 'Nano Stores', blurb: 'A request that is a store, in any framework.' },
+		],
+	},
+	{
 		title: 'Operating',
 		items: [
 			{ slug: 'hooks', title: 'Interceptors', blurb: 'before() / after(), per attempt.' },

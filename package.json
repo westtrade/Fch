@@ -17,7 +17,13 @@
 			"require": "./dist/Fch.literal.js",
 			"default": "./dist/Fch.literal.js"
 		},
-		"./package.json": "./package.json"
+		"./package.json": "./package.json",
+		"./plugins/nanostores": {
+			"types": "./dist/plugins/nanostores.d.ts",
+			"import": "./dist/plugins/nanostores.mjs",
+			"require": "./dist/plugins/nanostores.js",
+			"default": "./dist/plugins/nanostores.js"
+		}
 	},
 	"scripts": {
 		"build": "tsc && node scripts/build-esm.mjs",

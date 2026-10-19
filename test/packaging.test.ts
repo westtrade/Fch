@@ -117,6 +117,35 @@ describe("published package", () => {
 		expect(out.raw).toBe("https://x.test/a/b");
 	});
 
+	test("the nanostores plugin resolves as a subpath with an ESM default", async () => {
+		const app = join(workdir, "app");
+		const script = join(app, "plugin.mjs");
+		writeFileSync(
+			script,
+			`
+			import plugin, { nanostores } from "@westtrade/fch/plugins/nanostores";
+			import { Fch } from "@westtrade/fch";
+
+			const out = { same: plugin === nanostores, type: typeof nanostores };
+
+			const req = new Fch("https://x.test/y").use(nanostores());
+			out.hasGet = typeof req.get === "function";
+			out.hasListen = typeof req.listen === "function";
+			out.initial = req.get().loading;
+			out.plugins = req.plugins;
+			console.log(JSON.stringify(out));
+			`,
+		);
+
+		const out = JSON.parse(run(app, [script]).trim().split("\n").pop()!);
+		expect(out.same).toBe(true);
+		expect(out.type).toBe("function");
+		expect(out.hasGet).toBe(true);
+		expect(out.hasListen).toBe(true);
+		expect(out.initial).toBe(false);
+		expect(out.plugins).toEqual(["nanostores"]);
+	});
+
 	test("CJS: require() of both entries works", () => {
 		const app = join(workdir, "app");
 		const script = join(app, "cjs.cjs");
