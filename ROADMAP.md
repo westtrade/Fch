@@ -6,8 +6,82 @@ measurement taken at v1.2.5, so progress is checkable rather than aspirational.
 | Pillar | Goal | Status |
 | --- | --- | --- |
 | **AI-first** | Shortest possible spelling, so an LLM spends fewer tokens | literal entry exists; no LLM-facing docs yet |
-| **Human-first** | Obvious API, every common "how do I…" answered | 16 doc pages; cookbook missing |
+| **Human-first** | Obvious API, every common "how do I…" answered | 20 doc pages; cookbook missing; playground covers 1 case |
 | **Minimal** | Smallest raw (uncompressed) bundle | 15.6 kB; 3.6× larger than wretch |
+
+## 0. Playground: every case, one page
+
+**Status: nearest task.** Today the landing page has a playground, but it covers
+one case: edit a pathname and a query param, press Run, see the request and one
+mocked JSON response. That proves the URL *is* the request and nothing else.
+
+The goal is a single page where **every documented behaviour can be exercised
+and observed**, so neither a reader nor an LLM has to trust prose. It also
+becomes the fixture source for the docs: if a case cannot be demonstrated there,
+the claim is not verified.
+
+### What "every case" means
+
+A checklist, not a wish list. Each row is one control group with a visible
+effect.
+
+**Requests** — `setMethod`, `setJsonBody`, `setFormData` (element, event and
+selector), `appendToFormData`, `setFormUrlEncodedBody`, `setBody` with a
+`Blob`/stream for binary, `setHeader`/`setHeaders`/`deleteHeader`,
+`setAuthToken`/`setBasicAuth`, `setSearchParams` vs `appendSearchParams`,
+`appendFormToQuery`, `setFetchOptions`, `setCORS`, `disableCache`.
+
+**Reading** — `.json<T>()`, `.text()`, `.blob()`, `.send()` returning the raw
+`Response`, the `[data, response]` tuple, shortcuts (`fch.get`, `.post`, …) and
+the tagged template, all against the same mock so the shapes can be compared.
+
+**Reliability** — retries with a visible attempt counter and backoff timeline;
+`retryOn` filtering by status; `timeout` firing (and recovering); `maxRetryDelay`
+clamping; dedupe showing one call for N concurrent callers; `abort()` mid-flight
+and the builder staying reusable afterwards.
+
+**Interceptors** — `before()` running per attempt (counter) and `after()` running
+once, including an `after()` that throws and turns 200 into a rejection.
+
+**Timers** — `delayMs` / `timeoutMs` transitions (`idle → submitting → delayed →
+timeout`) driven by an adjustable mock latency, visible as a phase track.
+
+**Plugins** — nanostores (live store panel: `loading`, `data`, `error`, `timer`),
+validate (valid and invalid form, valid and invalid response, the formData
+default and the JSON skip warning), logger (live log lines at each level),
+compat (the deprecated aliases).
+
+**Polling** — `poll()` streaming iterations, with stop-on-abort and a yielded
+error visible in the stream.
+
+### Shape
+
+- One page, case list on the left, controls and output on the right.
+- Every case states **what to expect** next to what happened, so a mismatch is
+  visible without reading docs.
+- The mock `fetch` is scriptable per case (status, latency, body, throw) — the
+  same knob that makes retries and timeouts demonstrable.
+- Runs the real library bundle, as the current playground already does.
+- A case is done only when it can be linked with a URL fragment, so docs can
+  deep-link `?case=retry-429`.
+
+### Why this is first
+
+- It **verifies** the docs instead of asserting them. Running the documented
+  behaviours by hand already exposed three bugs this session (a rejecting
+  `onRequest` skipping `onError`, `poll()` dead after `abort()`, the absent
+  `Response` on a form failure). A playground makes that routine instead of
+  something I must remember to script.
+- It gives the cookbook and the LLM cheat sheet a source of truth to generate
+  from, rather than prose to keep in sync.
+- It is the cheapest way to find behaviours that are documented but unreachable,
+  and interactions nobody wrote down.
+
+### Open questions
+
+- Does this become a Playwright-verified page (each case asserted) or a manual
+  demo? Asserted, ideally: a case that cannot be checked is decoration.
+- Reuse the existing `check-interactions` harness, or fold these into it?
 
 ## 1. AI-first: token economy
 
@@ -210,11 +284,12 @@ axios/ky with more features". That is true and verifiable.
 
 | # | Work | Why |
 | --- | --- | --- |
-| 1 | `llms.txt` + LLM cheat sheet | Cheap, directly targets AI-first |
-| 2 | Measured comparison table | Cheap, serves both pillars |
-| 3 | Cookbook (10–15 recipes) | Medium, closes human-first |
-| 4 | Entry-point split | Expensive, delivers minimal |
-| 5 | Remove deprecated aliases | Breaking; 2.0 only |
+| 1 | **Playground: every case, one page** | Makes the whole API testable without reading docs; feeds every other task |
+| 2 | `llms.txt` + LLM cheat sheet | Cheap, directly targets AI-first |
+| 3 | Measured comparison table | Cheap, serves both pillars |
+| 4 | Cookbook (10–15 recipes) | Medium, closes human-first |
+| 5 | Entry-point split | Expensive, delivers minimal |
+| 6 | Remove deprecated aliases | Breaking; 2.0 only |
 
 ## Open questions
 
