@@ -79,6 +79,9 @@ error visible in the stream.
 
 ### Open questions
 
+- **Compose a request into a body (2b).** Worth a feature, or is the explicit
+  `await …blob()` enough? The silent `[object Promise]` is a bug either way.
+
 - Does this become a Playwright-verified page (each case asserted) or a manual
   demo? Asserted, ideally: a case that cannot be checked is decoration.
 - Reuse the existing `check-interactions` harness, or fold these into it?
@@ -254,6 +257,70 @@ library does not address:
 **Risk:** three call styles are flexibility *and* load. Every page needs a short
 "which one should I use".
 
+## 2b. Idea: a request in a body position
+
+**Status: unscoped. Decide whether this should exist at all.**
+
+The proposal: let a body be another request, so a download can be composed into
+an upload without a hand-written `then`.
+
+```ts
+// today: explicit, three lines, obvious
+const png = await fetch("/chart.png").then((r) => r.blob());
+await new Fch("https://api.example.com/uploads")
+	.setMethod("POST")
+	.setBody(png)            // Content-Type comes from the Blob
+	.send();
+
+// proposed: composition
+await new Fch("https://api.example.com/uploads")
+	.setMethod("POST")
+	.setBody(fch`/chart.png`)
+	.send();
+```
+
+### What I verified before writing this down
+
+- `` setBody(fch`https://…`) `` **does not throw today** — it stores the call
+  object, and `fetch` receives a `Promise`, so the wire body is the string
+  `[object Promise]`. Silent corruption, not an error. That alone argues for
+  either implementing this or rejecting it loudly.
+- The example as written (`` fch`/chart.png` `` — a relative path) **throws**:
+  `Fch requires an absolute URL`. The literal entry has no `baseUrl` support at
+  all, so a composed body would need one first.
+- The current `Blob` route works and is documented: the `Content-Type` comes
+  from the blob.
+
+### The hard questions
+
+1. **What does it mean?** Two readings, both defensible:
+   - *eager*: fetch the inner request to a `Blob`, then send — two round trips,
+     simple to reason about;
+   - *streaming*: pipe the inner response body into the outer request — one
+     pass, no memory spike, but the outer request must not start before the
+     inner responds, and Content-Type has to be copied across.
+2. **Is it worth the ambiguity?** A promise-typed body is the kind of magic that
+   reads well in a tweet and badly in a stack trace. The explicit `await` is one
+   line and needs no explanation.
+3. **Which entry points?** If `setBody` accepts it, does `setJsonBody`? Does
+   `` api.post(url, fch`…`) ``? Consistency argues for all of them or none, and
+   "all" is a much larger surface than the one case that motivated the idea.
+4. **Failure.** If the inner request fails, is the outer request rejected before
+   it is sent? Retries then apply to which request?
+5. **`baseUrl`.** Without it the feature only works with absolute URLs, which
+   makes the short form less useful than it looks.
+
+### Cheaper alternative
+
+Make the invalid case loud: if `setBody` receives a thenable, throw
+`TypeError` explaining that a request is not a body and pointing at
+`` fch`…`.json() `` / `await …blob()`. That removes the silent
+`[object Promise]` corruption for a few lines, without inventing a feature.
+
+**Recommendation: do the cheaper alternative first.** It fixes a real bug. Then
+decide the composition on its merits, with the question "does this remove a line
+or only hide one?" answered honestly.
+
 ## 3. Minimal: raw size
 
 Minified, raw / gzip:
@@ -343,13 +410,14 @@ axios/ky with more features". That is true and verifiable.
 | 5 | Cookbook (10–15 recipes) | Medium, closes human-first |
 | 6 | Entry-point split | Expensive, delivers minimal |
 | 7 | Remove deprecated aliases | Breaking; 2.0 only |
+| — | Reject a thenable body loudly (2b) | Small bug fix; the composition question can wait |
 
 ## Open questions
 
-- **Token measurement.** Without a way to measure "tokens a model spends
-  solving a task with this library", AI-first stays a hypothesis. A proxy
-  (characters in the solution + characters of instruction) is possible, but
-  then marketing must say it is a proxy.
+- **Token measurement — measured, not yet publishable.** `scripts/measure-tokens.mjs`
+  counts code tokens per task with a real BPE tokenizer (section 1). Still open:
+  the suite is small, one tokenizer is used, and instruction tokens are not
+  counted at all. Internal until those are answered.
 - **`llms.txt` location.** The standard expects the domain root, but the site
   is served from `/Fch/`. Needs a check on how crawlers resolve it.
 - **Compete with wretch on size?** Or accept "more features" instead — the
