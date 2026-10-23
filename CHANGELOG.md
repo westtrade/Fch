@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/westtrade/Fch/compare/v1.13.1...v1.14.0) (2026-10-23)
+
+
+### Features
+
+* warn on a non-standard HTTP method instead of rejecting it, and let a ([98849c0](https://github.com/westtrade/Fch/commit/98849c003b2a5874d970c85e32e904d103abc1cc))
+
 ## [1.13.1](https://github.com/westtrade/Fch/compare/v1.13.0...v1.13.1) (2026-10-19)
 
 

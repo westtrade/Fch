@@ -1,6 +1,6 @@
 {
 	"name": "@westtrade/fch",
-	"version": "1.13.1",
+	"version": "1.14.0",
 	"description": "URL and fetch combined: a request builder that IS a URL — with retries, timeouts, dedupe and typed body helpers.",
 	"main": "dist/Fch.js",
 	"types": "dist/Fch.d.ts",
