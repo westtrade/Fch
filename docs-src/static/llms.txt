@@ -43,6 +43,10 @@ const [user] = await fch.get<User>`https://api.test/users/1`;
 // POST JSON (object -> JSON + Content-Type)
 fch.post({ name: "Ann" })`https://api.test/users`;
 
+// other body encodings: a string in the options slot, or options.encode
+api.post("/users", body, "urlencoded");                    // x-www-form-urlencoded
+api.post("/users", body, { encode: "form", retries: 2 });  // multipart
+
 // query params: the instance IS a URL
 const req = new Fch("https://api.test/search");
 req.searchParams.set("q", "Tom & Jerry");   // encoded correctly

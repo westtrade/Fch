@@ -24,9 +24,9 @@ const [houses] = await api.get<House[]>("/houses");
 | `api.get(url, options?)` | options |
 | `api.head(url, options?)` | options |
 | `api.delete(url, options?)` | options |
-| `api.post(url, body?, encoding?, options?)` | body, then optional encoding, then options |
-| `api.put(url, body?, encoding?, options?)` | body, then optional encoding, then options |
-| `api.patch(url, body?, encoding?, options?)` | body, then optional encoding, then options |
+| `api.post(url, body?, options?)` | body, then options (or `"urlencoded"`) |
+| `api.put(url, body?, options?)` | body, then options (or `"urlencoded"`) |
+| `api.patch(url, body?, options?)` | body, then options (or `"urlencoded"`) |
 | `api.request(url, options?)` | returns a builder |
 
 The asymmetry is deliberate: `get`, `head` and `delete` take **options** as
@@ -40,16 +40,20 @@ api.request("/houses/1").setMethod("DELETE").setJsonBody({ reason: "duplicate" }
 
 ## Encoding the body
 
-A plain object does not say which wire format it wants, so the third argument
-picks one. **JSON is the default**, which is why most calls need nothing there.
+A plain object does not say which wire format it wants, so you say it. **JSON is
+the default**, which is why most calls need nothing there. Two spellings, same
+result:
 
 ```ts
-api.post("/houses", { name: "Cottage" });                              // JSON
-api.post("/houses", { name: "Cottage" }, "json");                      // same
-api.post("/houses", { name: "Cottage" }, "urlencoded");                // a=1&b=2
-api.post("/houses", { name: "Cottage", rooms: 3 }, "form");            // multipart
-api.post("/login", "user=ann", "text");                                // text/plain
+// a string in the options slot is shorthand for { encode: … }
+api.post("/houses", body, "urlencoded");
+
+// the same thing, alongside the other options
+api.post("/houses", body, { retries: 2, encode: "urlencoded" });
 ```
+
+Use the shorthand when the encoding is the only thing you set, and `encode` when
+the call already has options.
 
 | Encoding | `Content-Type` | Body |
 | --- | --- | --- |
@@ -62,8 +66,8 @@ api.post("/login", "user=ann", "text");                                // text/p
 The MIME names work too, so you can reuse a header value you already have:
 
 ```ts
-api.post("/houses", data, "application/x-www-form-urlencoded");
-api.post("/houses", data, "multipart/form-data");
+api.post("/houses", data, { encode: "application/x-www-form-urlencoded" });
+api.post("/houses", data, { encode: "multipart/form-data" });
 ```
 
 An array value repeats the key, which is what a form does:
@@ -72,16 +76,11 @@ An array value repeats the key, which is what a form does:
 api.post("/houses", { tag: ["a", "b"] }, "urlencoded"); // tag=a&tag=b
 ```
 
-Options still go last, and still work without an encoding:
+A `<form>` element or `FormData` already declares its own encoding, so `encode`
+is ignored there — the form wins.
 
-```ts
-api.post("/houses", body, "urlencoded", { retries: 2 });
-api.post("/houses", body, { retries: 2 });
-```
-
-A `<form>` element or `FormData` already declares its own encoding, so the
-argument is ignored there — the form wins.
-
+`encode` is a shortcut-only option: it is removed before the request is built, so
+it never reaches `fetch()`.
 
 ## Bodies are inferred
 

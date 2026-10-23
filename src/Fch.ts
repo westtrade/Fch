@@ -2154,6 +2154,14 @@ export interface FchInstanceOptions extends FetchRequestOptions {
 	baseUrl?: string;
 	/** Alias for `baseUrl`. */
 	baseURL?: string;
+	/**
+	 * How a shortcut body is encoded. Shortcut-only: it is dropped before the
+	 * request is built, so it never reaches `fetch()`.
+	 *
+	 * @example
+	 * api.post("/houses", body, { encode: "urlencoded", retries: 2 });
+	 */
+	encode?: BodyEncoding;
 }
 
 /** True for a URL that carries its own scheme (`https:`, `data:`, `mailto:`). */
@@ -2345,7 +2353,9 @@ function withBaseAlias(options: FchInstanceOptions = {}): FchInstanceOptions {
 /** Drop shortcut-only keys so they never reach `fetch()`. */
 function toRequestOptions(options?: FchInstanceOptions): FetchRequestOptions {
 	if (!options) return {};
-	const { baseUrl, ...rest } = options;
+	// `baseUrl` and `encode` are shortcut concerns; forwarding them would put
+	// junk on the fetch init object.
+	const { baseUrl, encode, ...rest } = options;
 	return rest;
 }
 
@@ -2366,16 +2376,15 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 
 	for (const method of SHORTCUT_METHODS) {
 		shortcuts[method] = <T>(url: string | URL, ...rest: unknown[]) => {
-			// `get(url, options)` / `post(url, body, options)`
-			// `post(url, body, encoding)` / `post(url, body, encoding, options)`
+			// `post(url, body)` / `post(url, body, options)`
+			// `post(url, body, "urlencoded")` — a string in the options slot is an
+			// encoding shorthand for `{ encode: "urlencoded" }`.
 			const hasBody = !BODYLESS_METHODS.has(method);
 			const first = rest[0] as FchBodyInput | undefined;
 
-			// A string in the second slot is an encoding, not options: options is
-			// always an object.
 			const second = rest[1];
-			const encoding = typeof second === 'string' ? (second as BodyEncoding) : undefined;
-			const optionsSlot = encoding ? rest[2] : second;
+			// Options are always an object, so a string here can only be an encoding.
+			const optionsSlot = typeof second === 'string' ? { encode: second } : second;
 
 			// A form is accepted anywhere a body goes, including the body-less
 			// shortcuts: HTML says a GET form contributes its fields to the query
@@ -2399,7 +2408,7 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 				// does. No body, and no form-object properties reach `fetch()`.
 				request.appendFormToQuery(form);
 			} else if (hasBody && first !== undefined && first !== null) {
-				applyShortcutBody(request, first, encoding);
+				applyShortcutBody(request, first, options.encode);
 			}
 
 			return toCall<T>(request);

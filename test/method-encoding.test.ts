@@ -157,10 +157,27 @@ describe("shortcut body encoding", () => {
 		expect(String(bodyOf())).toBe("hello");
 	});
 
-	test("an encoding and options can be combined", async () => {
-		await api.post("/houses", { a: 1 }, "urlencoded", { retries: 2 });
+	test("an encoding can be combined with options", async () => {
+		await api.post("/houses", { a: 1 }, { retries: 2, encode: "urlencoded" });
 
 		expect(typeOf()).toBe("application/x-www-form-urlencoded");
+	});
+
+	test("`encode` in options and the string shorthand agree", async () => {
+		await api.post("/houses", { a: 1, b: 2 }, "urlencoded");
+		const viaString = String(bodyOf());
+
+		await api.post("/houses", { a: 1, b: 2 }, { encode: "urlencoded" });
+		expect(String(bodyOf())).toBe(viaString);
+	});
+
+	test("`encode` never reaches the fetch init", async () => {
+		await api.post("/houses", { a: 1 }, { encode: "urlencoded", retries: 2 });
+
+		const init = sent[0].init as Record<string, unknown>;
+		expect(init.encode).toBeUndefined();
+		// The other shortcut-only key must stay stripped too.
+		expect(init.baseUrl).toBeUndefined();
 	});
 
 	test("options still work without an encoding", async () => {
