@@ -67,7 +67,9 @@ export type LogEvent =
 	/** A body could not be cloned: no arguments */
 	| 'clone-warning'
 	/** A plugin skipped its work: `(what, url)` — e.g. form validation on JSON */
-	| 'validate-skipped';
+	| 'validate-skipped'
+	/** A request uses a non-standard HTTP method: `(message)` */
+	| 'method-warning';
 
 /**
  * UI timer phase, mirroring Superforms' loading timers:
@@ -182,15 +184,54 @@ const MUTATING_METHODS = new Set<HttpMethod>(['POST', 'PUT', 'PATCH', 'DELETE'])
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 
 /**
- * Upper-case and validate an HTTP method. Shared by the constructor and
- * {@link Fch.setMethod} so `{ method: 'FOO' }` fails exactly like `setMethod('FOO')`.
+ * Methods a `Request` cannot be built with at all: `fetch` itself rejects these,
+ * so an early error with the real reason beats a confusing failure later.
  */
-function normalizeMethod(method: string): HttpMethod {
+const FORBIDDEN_METHODS = new Set(['CONNECT', 'TRACE', 'TRACK']);
+
+/**
+ * RFC 9110 method token: one or more `tchar`, which excludes spaces, control
+ * characters and separators. Anything outside this cannot be sent, so it is a
+ * genuine error rather than a warning.
+ */
+const METHOD_TOKEN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/**
+ * Upper-case and validate an HTTP method.
+ *
+ * Known methods are always accepted. Anything else is passed through when the
+ * platform can send it — WebDAV's `PROPFIND`, Varnish's `PURGE`, or a custom
+ * verb — and reported through {@link Fch.emit} so the logger plugin can warn.
+ * The old behaviour threw for every unknown name, which rejected legal requests.
+ *
+ * @param method - The method name as written.
+ * @param onWarn - Called with a message for a non-standard method.
+ */
+function normalizeMethod(
+	method: string,
+	onWarn?: (message: string) => void,
+): string {
 	const normalized = method.toUpperCase();
-	if (!(HTTP_METHODS as readonly string[]).includes(normalized)) {
-		throw new TypeError(`Unsupported HTTP method: ${method}`);
+
+	if (!METHOD_TOKEN.test(normalized)) {
+		throw new TypeError(`Invalid HTTP method: ${JSON.stringify(method)}`);
 	}
-	return normalized as HttpMethod;
+
+	if (FORBIDDEN_METHODS.has(normalized)) {
+		throw new TypeError(
+			`\`fetch\` cannot send the ${normalized} method: the platform forbids it. ` +
+				'Use XMLHttpRequest or a raw socket if you really need it.',
+		);
+	}
+
+	if (!(HTTP_METHODS as readonly string[]).includes(normalized)) {
+		onWarn?.(
+			`Non-standard HTTP method "${normalized}": it will be sent as-is. ` +
+				'Most servers reject unknown methods; check that this is intended.',
+		);
+	}
+
+	return normalized;
 }
 
 /**
@@ -441,6 +482,9 @@ export class Fch extends URL {
 	 */
 	private logSink: ((event: LogEvent, args: unknown[]) => void) | null = null;
 
+	/** A warning raised while parsing constructor options, before any sink existed. */
+	private pendingMethodWarning: string | null = null;
+
 	/** Whether debug-level events are emitted. The logger plugin reads this. */
 	debug: boolean;
 
@@ -574,9 +618,13 @@ export class Fch extends URL {
 		this.fetchOptions = {
 			...options,
 			// Normalize here so `{ method: 'post' }` behaves exactly like
-			// `setMethod('POST')` (idempotency/dedupe checks are case-sensitive) —
-			// including rejecting an unsupported method instead of sending it.
-			method: normalizeMethod(options.method ? String(options.method) : 'GET'),
+			// `setMethod('POST')` (idempotency/dedupe checks are case-sensitive).
+			// A non-standard method is reported, not rejected: the platform can
+			// send it, and refusing closed a legal use case.
+			method: normalizeMethod(options.method ? String(options.method) : 'GET', (message) => {
+				// No sink exists yet, so remember it and emit on first use.
+				this.pendingMethodWarning = message;
+			}),
 		};
 
 		this.retries = retries;
@@ -977,7 +1025,7 @@ export class Fch extends URL {
 	 * api.setMethod('POST');
 	 */
 	setMethod(method: string): this {
-		this.fetchOptions.method = normalizeMethod(method);
+		this.fetchOptions.method = normalizeMethod(method, (message) => this.emit('method-warning', message));
 		return this;
 	}
 
@@ -986,7 +1034,7 @@ export class Fch extends URL {
 	}
 
 	set method(value: string) {
-		this.fetchOptions.method = normalizeMethod(value);
+		this.fetchOptions.method = normalizeMethod(value, (message) => this.emit('method-warning', message));
 	}
 
 	/**
@@ -1032,7 +1080,9 @@ export class Fch extends URL {
 		// `method` gets the same validation as `setMethod`/the constructor, so
 		// this door cannot smuggle in a method those two would reject.
 		if (rest.method !== undefined) {
-			this.fetchOptions.method = normalizeMethod(String(rest.method));
+			this.fetchOptions.method = normalizeMethod(String(rest.method), (message) =>
+				this.emit('method-warning', message),
+			);
 		}
 
 		if (headers !== undefined) {
@@ -1401,6 +1451,15 @@ export class Fch extends URL {
 	 */
 	private async runWithHooks(run: () => Promise<Response>): Promise<Response> {
 		this.startTimers();
+
+		// A non-standard method passed to the constructor could not be reported
+		// then (no sink exists yet), so it surfaces on first use.
+		if (this.pendingMethodWarning) {
+			const message = this.pendingMethodWarning;
+			this.pendingMethodWarning = null;
+			this.emit('method-warning', message);
+		}
+		
 
 		try {
 			// Request hooks run INSIDE the try: a hook may reject on purpose —
@@ -2222,6 +2281,50 @@ export function toCall<T>(instance: Fch): FchCall<T> {
 const SHORTCUT_METHODS = ['get', 'head', 'delete', 'post', 'put', 'patch'] as const;
 type ShortcutMethod = (typeof SHORTCUT_METHODS)[number];
 
+/**
+ * How a shortcut body is encoded. `json` is the default; the rest exist because
+ * a plain object cannot say which wire format it wants.
+ *
+ * The MIME names are accepted too, so a caller can write the header value it
+ * already has in mind.
+ */
+export type BodyEncoding =
+	| 'json'
+	| 'urlencoded'
+	| 'form'
+	| 'text'
+	| 'raw'
+	| 'application/json'
+	| 'application/x-www-form-urlencoded'
+	| 'multipart/form-data'
+	| 'text/plain';
+
+/** Normalize a user-supplied encoding name to its short form. */
+function normalizeEncoding(encoding: BodyEncoding | undefined): 'json' | 'urlencoded' | 'form' | 'text' | 'raw' {
+	switch (encoding) {
+		case undefined:
+		case 'json':
+		case 'application/json':
+			return 'json';
+		case 'urlencoded':
+		case 'application/x-www-form-urlencoded':
+			return 'urlencoded';
+		case 'form':
+		case 'multipart/form-data':
+			return 'form';
+		case 'text':
+		case 'text/plain':
+			return 'text';
+		case 'raw':
+			return 'raw';
+		default:
+			throw new TypeError(
+				`Unsupported body encoding: ${JSON.stringify(encoding)}. ` +
+					"Use 'json', 'urlencoded', 'form', 'text' or 'raw'.",
+			);
+	}
+}
+
 // `delete(url, options)` — the second argument carries options, not a body: a
 // DELETE payload is rare, and `api.request(url).setMethod('DELETE').setJsonBody(…)`
 // still covers it. Treating it as a body silently sent `{"timeout":100}` upstream.
@@ -2264,8 +2367,15 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 	for (const method of SHORTCUT_METHODS) {
 		shortcuts[method] = <T>(url: string | URL, ...rest: unknown[]) => {
 			// `get(url, options)` / `post(url, body, options)`
+			// `post(url, body, encoding)` / `post(url, body, encoding, options)`
 			const hasBody = !BODYLESS_METHODS.has(method);
 			const first = rest[0] as FchBodyInput | undefined;
+
+			// A string in the second slot is an encoding, not options: options is
+			// always an object.
+			const second = rest[1];
+			const encoding = typeof second === 'string' ? (second as BodyEncoding) : undefined;
+			const optionsSlot = encoding ? rest[2] : second;
 
 			// A form is accepted anywhere a body goes, including the body-less
 			// shortcuts: HTML says a GET form contributes its fields to the query
@@ -2273,7 +2383,7 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 			// leaked the form's own properties into the `fetch()` init object.
 			const form = !hasBody && first != null ? toFormData(first) : null;
 			const options = withBaseAlias(
-				(form || hasBody ? rest[1] : rest[0]) as FchInstanceOptions | undefined
+				(form || hasBody ? optionsSlot : rest[0]) as FchInstanceOptions | undefined
 			);
 
 			const request = new Fch(resolveUrl(url, options.baseUrl ?? baseUrl), {
@@ -2289,7 +2399,7 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 				// does. No body, and no form-object properties reach `fetch()`.
 				request.appendFormToQuery(form);
 			} else if (hasBody && first !== undefined && first !== null) {
-				applyShortcutBody(request, first);
+				applyShortcutBody(request, first, encoding);
 			}
 
 			return toCall<T>(request);
@@ -2307,7 +2417,11 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
  * - anything else → handed to `fetch()` as-is
  */
 /** Shared with the tagged-template entry point in `Fch.literal.ts`. */
-export function applyShortcutBody(request: Fch, body: FchBodyInput): void {
+export function applyShortcutBody(
+	request: Fch,
+	body: FchBodyInput,
+	encoding?: BodyEncoding,
+): void {
 	// Build the FormData once: `setFormData` would otherwise call `toFormData`
 	// again, reading the whole form a second time on every submit.
 	const formData = toFormData(body);
@@ -2318,6 +2432,8 @@ export function applyShortcutBody(request: Fch, body: FchBodyInput): void {
 		return;
 	}
 
+	const format = normalizeEncoding(encoding);
+
 	// `isNativeBody` already covers ArrayBuffer and every ArrayBuffer view, so
 	// only the Node-stream shape needs its own check here.
 	const isPlainData =
@@ -2325,8 +2441,40 @@ export function applyShortcutBody(request: Fch, body: FchBodyInput): void {
 		!isNativeBody(body) &&
 		typeof (body as { pipe?: unknown }).pipe !== 'function';
 
-	if (isPlainData) {
+	// `text` applies to any body, not just plain data: `post(url, 'hello', 'text')`
+	// must still get a text/plain content type. Handled before the else-branch
+	// below, which deliberately sets none.
+	if (format === 'text') {
+		request.setBody(String(body), 'text/plain');
+		return;
+	}
+
+	if (isPlainData && format !== 'raw' && format !== 'form') {
+		const record = body as Record<string, string | number | boolean | Array<string | number | boolean>>;
+
+		if (format === 'urlencoded') {
+			request.setFormUrlEncodedBody(record);
+			return;
+		}
+
 		request.setJsonBody(body);
+		return;
+	}
+
+	// `form` on a plain object builds a multipart body field by field.
+	if (format === 'form' && isPlainData) {
+		const record = body as Record<string, unknown>;
+		const data = new FormData();
+		for (const [key, value] of Object.entries(record)) {
+			if (Array.isArray(value)) {
+				for (const item of value) data.append(key, toFormValue(item));
+			} else {
+				data.append(key, toFormValue(value));
+			}
+		}
+		const intendedMethod = request.method;
+		request.setFormData(data);
+		request.setMethod(intendedMethod);
 		return;
 	}
 
@@ -2336,6 +2484,13 @@ export function applyShortcutBody(request: Fch, body: FchBodyInput): void {
 	if (isStreamBody(body)) {
 		request.setFetchOptions({ duplex: 'half' } as RequestInit);
 	}
+}
+
+/** A form field value: blobs pass through, everything else is stringified. */
+function toFormValue(value: unknown): string | Blob {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+		? (value as Blob)
+		: String(value);
 }
 
 const isStreamBody = (body: unknown): boolean =>

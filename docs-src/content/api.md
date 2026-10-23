@@ -353,7 +353,8 @@ and `request` attached.
 | --- | --- |
 | `TypeError: Fch requires an absolute URL` | Relative path without a `baseUrl` |
 | `TypeError: Fch requires an absolute \`baseUrl\`` | Relative base passed to `create()` |
-| `TypeError: Unsupported HTTP method: X` | Unknown method via any entry point |
+| `TypeError: Invalid HTTP method: X` | Not a valid method token (spaces, empty) |
+| `TypeError: fetch cannot send the CONNECT method` | CONNECT / TRACE / TRACK are platform-forbidden |
 | `TypeError: Cannot retry requests with ReadableStream body` | Stream body plus `retries > 0` |
 | `TypeError: setFormData() expects FormData, a <form> element, or a submit event` | Not form-like |
 | `Error: Invalid retries: N` | Negative or non-integer |

@@ -24,9 +24,9 @@ const [houses] = await api.get<House[]>("/houses");
 | `api.get(url, options?)` | options |
 | `api.head(url, options?)` | options |
 | `api.delete(url, options?)` | options |
-| `api.post(url, body?, options?)` | body, then options |
-| `api.put(url, body?, options?)` | body, then options |
-| `api.patch(url, body?, options?)` | body, then options |
+| `api.post(url, body?, encoding?, options?)` | body, then optional encoding, then options |
+| `api.put(url, body?, encoding?, options?)` | body, then optional encoding, then options |
+| `api.patch(url, body?, encoding?, options?)` | body, then optional encoding, then options |
 | `api.request(url, options?)` | returns a builder |
 
 The asymmetry is deliberate: `get`, `head` and `delete` take **options** as
@@ -37,6 +37,51 @@ argument as a body would silently send `{"timeout":5000}` upstream. For a
 ```ts
 api.request("/houses/1").setMethod("DELETE").setJsonBody({ reason: "duplicate" });
 ```
+
+## Encoding the body
+
+A plain object does not say which wire format it wants, so the third argument
+picks one. **JSON is the default**, which is why most calls need nothing there.
+
+```ts
+api.post("/houses", { name: "Cottage" });                              // JSON
+api.post("/houses", { name: "Cottage" }, "json");                      // same
+api.post("/houses", { name: "Cottage" }, "urlencoded");                // a=1&b=2
+api.post("/houses", { name: "Cottage", rooms: 3 }, "form");            // multipart
+api.post("/login", "user=ann", "text");                                // text/plain
+```
+
+| Encoding | `Content-Type` | Body |
+| --- | --- | --- |
+| `'json'` (default) | `application/json` | `JSON.stringify(body)` |
+| `'urlencoded'` | `application/x-www-form-urlencoded` | `URLSearchParams` |
+| `'form'` | `multipart/form-data; boundary=…` | `FormData` |
+| `'text'` | `text/plain` | `String(body)` |
+| `'raw'` | none — you set it | body passed through untouched |
+
+The MIME names work too, so you can reuse a header value you already have:
+
+```ts
+api.post("/houses", data, "application/x-www-form-urlencoded");
+api.post("/houses", data, "multipart/form-data");
+```
+
+An array value repeats the key, which is what a form does:
+
+```ts
+api.post("/houses", { tag: ["a", "b"] }, "urlencoded"); // tag=a&tag=b
+```
+
+Options still go last, and still work without an encoding:
+
+```ts
+api.post("/houses", body, "urlencoded", { retries: 2 });
+api.post("/houses", body, { retries: 2 });
+```
+
+A `<form>` element or `FormData` already declares its own encoding, so the
+argument is ignored there — the form wins.
+
 
 ## Bodies are inferred
 

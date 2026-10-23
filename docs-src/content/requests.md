@@ -18,19 +18,42 @@ api.post("/houses", { name: "Cottage" }); // object -> JSON
 fch.post({ name: "Cottage" })`https://api.example.com/houses`;
 ```
 
-Methods are validated and upper-cased:
+Methods are upper-cased, and anything the platform can send is accepted:
 
 ```ts
 new Fch(url, { method: "post" }).method; // "POST"
 new Fch(url).setMethod("post").method;   // "POST"
-new Fch(url).setMethod("FETCH");         // TypeError: Unsupported HTTP method: FETCH
+
+// Not on the standard list, but a real method: sent as-is, with a warning.
+new Fch(url).setMethod("PURGE").method;  // "PURGE"  → [WARN] Non-standard HTTP method
+new Fch(url, { method: "PROPFIND" });    // WebDAV, works
 ```
 
-Supported: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`.
+Common methods: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`. They
+are never warned about.
 
-The same validation applies when the method arrives through `setFetchOptions`
-or the constructor, so there is no back door that lets an invalid method
-through to `fetch`.
+### What is rejected, and why
+
+Only two cases throw, because neither can result in a request:
+
+| Call | Result |
+| --- | --- |
+| `setMethod("CONNECT")` | `TypeError` — `fetch` forbids `CONNECT`, `TRACE`, `TRACK` |
+| `setMethod("GE T")` | `TypeError` — not a valid HTTP method token |
+
+A non-standard *legal* method (`PURGE`, `PROPFIND`, `LINK`, a custom verb) is
+**not** an error. It is sent, and reported through the logger as a warning:
+
+```text
+[WARN] Non-standard HTTP method "PURGE": it will be sent as-is.
+       Most servers reject unknown methods; check that this is intended.
+```
+
+The warning goes through the event stream, so it needs the
+[logger plugin](logging.md) to be visible. Without it, the request is still sent.
+
+The same rules apply in the constructor, `setMethod` and `setFetchOptions`, so
+there is no back door that lets an unsendable method through to `fetch`.
 
 ## Bodies
 

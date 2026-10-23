@@ -3,7 +3,7 @@
 > HTTP client where the URL *is* the request. `Fch` extends the native `URL`
 > class, so one object is both a mutable URL and the request that targets it,
 > with retries, timeouts, dedupe, form handling and typed bodies on top. Zero
-> dependencies, TypeScript, ~6 kB gzipped, installed from GitHub (not npm).
+> dependencies, TypeScript, ~6.5 kB gzipped, installed from GitHub (not npm).
 
 Key facts an agent needs before writing code:
 

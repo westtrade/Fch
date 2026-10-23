@@ -46,6 +46,7 @@ const LEVELS: Record<LogEvent, keyof Logger> = {
 	caught: 'debug',
 	'clone-warning': 'warn',
 	'validate-skipped': 'warn',
+	'method-warning': 'warn',
 };
 
 /** Render one event as a readable line. */
@@ -69,6 +70,8 @@ function format(event: LogEvent, args: unknown[]): string {
 			return 'Cannot clone non-serializable body';
 		case 'validate-skipped':
 			return `${String(args[0])} skipped: no form body on ${String(args[1])}`;
+		case 'method-warning':
+			return String(args[0]);
 	}
 }
 

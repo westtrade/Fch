@@ -529,12 +529,21 @@ describe("B18 — setSearchParams replaces the query", () => {
 // ---------------------------------------------------------------- B19
 
 describe("B19 — method validation is the same in the constructor and setMethod", () => {
-	test("both reject an unsupported method", () => {
-		expect(() => new Fch(B, { method: "FOO" })).toThrow(/Unsupported HTTP method/);
-		expect(() => new Fch(B).setMethod("FOO")).toThrow(/Unsupported HTTP method/);
-		expect(() => {
-			new Fch(B).method = "FOO";
-		}).toThrow(/Unsupported HTTP method/);
+	// The rule changed: an unknown-but-legal method is a warning, not an error.
+	// What must stay identical is that all three entry points agree.
+	test("all three accept an unknown-but-legal method", () => {
+		expect(new Fch(B, { method: "FOO" }).method).toBe("FOO");
+		expect(new Fch(B).setMethod("FOO").method).toBe("FOO");
+		expect((() => { const r = new Fch(B); r.method = "FOO"; return r.method; })()).toBe("FOO");
+	});
+
+	test("all three still reject a method that cannot be sent", () => {
+		for (const bad of ["CONNECT", "GE T"]) {
+			// Two different reasons: forbidden by the platform, or not a token.
+			expect(() => new Fch(B, { method: bad }), bad).toThrow(/HTTP method|platform forbids/);
+			expect(() => new Fch(B).setMethod(bad), bad).toThrow(/HTTP method|platform forbids/);
+			expect(() => { new Fch(B).method = bad; }, bad).toThrow(/HTTP method|platform forbids/);
+		}
 	});
 
 	test("a lowercase method is still normalised", () => {
@@ -545,11 +554,14 @@ describe("B19 — method validation is the same in the constructor and setMethod
 // ---------------------------------------------------------------- B20
 
 describe("B20 — setFetchOptions validates the method too", () => {
-	test("rejects an unsupported method instead of smuggling it through", () => {
+	test("validates the method instead of smuggling it through", () => {
 		const req = new Fch(B);
 
-		expect(() => req.setFetchOptions({ method: "FOO" })).toThrow(/Unsupported HTTP method/);
+		// Legal but unknown: accepted, and normalised.
+		expect(req.setFetchOptions({ method: "foo" }).method).toBe("FOO");
 		expect(req.setFetchOptions({ method: "patch" }).method).toBe("PATCH");
+		// Unsuntilable: still rejected.
+		expect(() => req.setFetchOptions({ method: "CONNECT" })).toThrow(/platform forbids/);
 	});
 });
 
