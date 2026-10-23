@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/westtrade/Fch/compare/v1.14.0...v1.15.0) (2026-10-23)
+
+
+### Features
+
+* **shortcuts:** move the body encoding into options as `encode` ([f41def0](https://github.com/westtrade/Fch/commit/f41def05a1946f9708bce42ee62130f5f9471395))
+
 # [1.14.0](https://github.com/westtrade/Fch/compare/v1.13.1...v1.14.0) (2026-10-23)
 
 
