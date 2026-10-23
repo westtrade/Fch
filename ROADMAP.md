@@ -83,6 +83,58 @@ error visible in the stream.
   demo? Asserted, ideally: a case that cannot be checked is decoration.
 - Reuse the existing `check-interactions` harness, or fold these into it?
 
+## 0b. Docs shaped like svelte.dev: a catalog, one file, and per-section LLM docs
+
+**Status: after the playground.** The reference here is svelte.dev, which
+publishes a machine-readable catalog next to the pages instead of keeping the
+navigation in a template.
+
+### What Svelte actually ships (measured)
+
+| Artefact | Shape | Size |
+| --- | --- | --- |
+| `/docs/experimental/sections.json` | 203 entries, key is the path, value `{ metadata: { title }, slug }` | 19.6 kB |
+| `/llms.txt` | index of documentation *sets* plus per-package files | 1.7 kB |
+| `/llms-full.txt` | every page concatenated | 1.26 MB |
+| `/llms-medium.txt` | examples and non-essential content removed | 870 kB |
+| `/llms-small.txt` | minimal version | 53 kB |
+| `/docs/<pkg>/llms.txt` | that section only, prefixed with `<SYSTEM>…</SYSTEM>` | 481 kB (svelte) |
+
+So the catalog is not decoration: it is the source the navigation *and* the LLM
+files are generated from, at three verbosity levels, sliced per package.
+
+### What Fch has
+
+- `llms.txt` (7.2 kB) and `llms-full.txt` (150 kB) — the two extremes, no middle,
+  no slicing.
+- The page list lives in **three** places that must agree by hand: the `NAV`
+  array in `scripts/build-site.mjs`, a second hardcoded list in
+  `test/docs.test.ts`, and the files in `docs-src/content/`. Nothing
+  machine-readable is published, so an agent cannot discover the pages without
+  fetching the HTML.
+- No per-section files: to read the plugin docs, an agent takes all 150 kB or has
+  to scrape the HTML page.
+
+### TODO
+
+- [ ] Publish `sections.json`: path → `{ metadata: { title, blurb }, slug }`,
+      generated from the existing `NAV` so the site nav and the file cannot drift
+- [ ] Generate `llms-full.txt` from that catalog instead of a separate page list
+- [ ] Add a middle tier (`llms-medium.txt`): every page, code blocks trimmed to
+      the first per page — the 150 kB file is beyond most useful context
+- [ ] Per-section files at `docs/<slug>/llms.txt`, each as a standalone
+      `<SYSTEM>`-prefixed document, so "read the retries docs" costs ~2 kB
+- [ ] Teach `llms.txt` to index those sets, the way Svelte's does
+- [ ] Collapse the three copies of the page list into the catalog, and make the
+      tests read it instead of repeating it — one source, or drift returns
+
+### Why not now
+
+Generating five artefacts from one catalog multiplies the surfaces a single
+`NAV` edit has to keep consistent. The playground comes first because it decides
+*what* the pages should contain; restructuring the output before settling the
+content means generating five slightly wrong things instead of one.
+
 ## 1. AI-first: token economy
 
 The hypothesis: shorter code means fewer output tokens, and a compact
@@ -285,11 +337,12 @@ axios/ky with more features". That is true and verifiable.
 | # | Work | Why |
 | --- | --- | --- |
 | 1 | **Playground: every case, one page** | Makes the whole API testable without reading docs; feeds every other task |
-| 2 | `llms.txt` + LLM cheat sheet | Cheap, directly targets AI-first |
-| 3 | Measured comparison table | Cheap, serves both pillars |
-| 4 | Cookbook (10–15 recipes) | Medium, closes human-first |
-| 5 | Entry-point split | Expensive, delivers minimal |
-| 6 | Remove deprecated aliases | Breaking; 2.0 only |
+| 2 | **Docs like svelte.dev: `sections.json`, one file, per-section LLM docs** | Makes the docs machine-readable and sliceable |
+| 3 | `llms.txt` + LLM cheat sheet | Cheap, directly targets AI-first |
+| 4 | Measured comparison table | Cheap, serves both pillars |
+| 5 | Cookbook (10–15 recipes) | Medium, closes human-first |
+| 6 | Entry-point split | Expensive, delivers minimal |
+| 7 | Remove deprecated aliases | Breaking; 2.0 only |
 
 ## Open questions
 
