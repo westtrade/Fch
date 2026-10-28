@@ -82,6 +82,18 @@ is ignored there — the form wins.
 `encode` is a shortcut-only option: it is removed before the request is built, so
 it never reaches `fetch()`.
 
+`encode` can also be set once in `create()`, as the default for every shortcut
+on that instance. A per-call `encode` overrides it:
+
+```ts
+const api = fch.create({ baseUrl: "https://api.example.com", encode: "urlencoded" });
+api.post("/houses", body);                        // urlencoded
+api.post("/houses", body, { encode: "json" });    // json for this call
+```
+
+The pre-1.15 form `post(url, body, "urlencoded", options)` is no longer accepted:
+it throws a `TypeError`. Move the encoding into the options object instead.
+
 ## Bodies are inferred
 
 The shortcut inspects what you pass:

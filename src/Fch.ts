@@ -290,7 +290,6 @@ export function toFormData(value: unknown): FormData | null {
 	return form ? buildFormData(form, resolveSubmitter(value)) : null;
 }
 
-/** Extract the `<form>` from a form element or from an event that targets one. */
 /**
  * Resolve a CSS selector to a form, in the document where it is looked up.
  *
@@ -318,6 +317,7 @@ export function resolveFormSelector(selector: string): FormLike | null {
 	return isFormElement(found) ? found : null;
 }
 
+/** Extract the `<form>` from a form element or from an event that targets one. */
 export function resolveForm(value: unknown): FormLike | null {
 	if (isFormElement(value)) return value;
 
@@ -366,7 +366,6 @@ function buildFormData(form: FormLike, submitter: FormLike | null): FormData {
 	}
 }
 
-/** Base64-encode text as UTF-8 — `btoa` alone rejects non-Latin-1 characters. */
 /**
  * Body for plugin hooks: JSON when the server says so, text otherwise. Reading
  * never throws — a malformed body yields `null` rather than breaking a request
@@ -386,6 +385,7 @@ async function parsePluginBody(response: Response): Promise<unknown> {
 	return text;
 }
 
+/** Base64-encode text as UTF-8 — `btoa` alone rejects non-Latin-1 characters. */
 function base64Encode(text: string): string {
 	const bytes = new TextEncoder().encode(text);
 	let binary = '';
@@ -544,6 +544,8 @@ export class Fch extends URL {
 
 	/** Names of attached plugins, so `use()` is idempotent. */
 	private pluginNames = new Set<string>();
+	/** The plugin objects themselves, so `clone()` can attach them again. */
+	private attachedPlugins: Plugin[] = [];
 
 	/** Per-plugin scratch space, keyed by plugin name. */
 	private pluginState = new Map<string, Map<string, unknown>>();
@@ -630,12 +632,7 @@ export class Fch extends URL {
 		this.retries = retries;
 		this.retryDelay = retryDelay ?? retryTimeout ?? 1000;
 		this.maxRetryDelay = maxRetryDelay;
-		// Same rule as setTimeout(): a negative or NaN timeout is a mistake, not
-		// a way to disable the timeout (use 0 for that).
-		if (!Number.isFinite(timeout) || timeout < 0) {
-			throw new Error(`Invalid timeout: ${timeout}`);
-		}
-		this.timeout = timeout;
+		this.timeout = assertTimeout(timeout);
 		this.controller = abortController || new AbortController();
 		this.ownsController = !abortController;
 		this.userSignal = signal ?? undefined;
@@ -751,29 +748,6 @@ export class Fch extends URL {
 	}
 
 	/**
-	 * Set the form body from `FormData`, a `<form>` element, or a submit `Event`.
-	 *
-	 * All four spellings of the same intent work:
-	 *
-	 * ```ts
-	 * form.onsubmit = (e) => api.setFormData(new FormData(e.target as HTMLFormElement));
-	 * form.onsubmit = (e) => api.setFormData(e);          // the event itself
-	 * form.onsubmit = (e) => api.setFormData(e.target);   // the <form>
-	 * form.onsubmit = (e) => api.setFormData(form);       // the element
-	 * ```
-	 *
-	 * The HTTP method is taken from the form's `method` attribute when it is not the
-	 * default `GET` (so a `<form method="post">` posts, and `method="get"`/absent
-	 * keeps the normal form semantics). `Content-Type` is cleared so the runtime can
-	 * set the correct `multipart/form-data; boundary=…`.
-	 *
-	 * @param {FormData|HTMLFormElement|Event} formData - Form data, a form, or a submit event.
-	 * @returns {Fch} Current instance for chaining.
-	 *
-	 * @example
-	 * form.onsubmit = (e) => { e.preventDefault(); api.setFormData(e).send(); };
-	 */
-	/**
 	 * Set the form body from a CSS selector, for when you do not have the element
 	 * at hand:
 	 *
@@ -791,6 +765,31 @@ export class Fch extends URL {
 		return this.setFormData(selector);
 	}
 
+	/**
+	 * Set the form body from `FormData`, a `<form>` element, a submit `Event`, or
+	 * a CSS selector for a form.
+	 *
+	 * All four spellings of the same intent work:
+	 *
+	 * ```ts
+	 * form.onsubmit = (e) => api.setFormData(new FormData(e.target as HTMLFormElement));
+	 * form.onsubmit = (e) => api.setFormData(e);          // the event itself
+	 * form.onsubmit = (e) => api.setFormData(e.target);   // the <form>
+	 * form.onsubmit = (e) => api.setFormData(form);       // the element
+	 * ```
+	 *
+	 * The HTTP method is taken from the form's `method` attribute when it is not the
+	 * default `GET` (so a `<form method="post">` posts, and `method="get"`/absent
+	 * keeps the normal form semantics). `Content-Type` is cleared so the runtime can
+	 * set the correct `multipart/form-data; boundary=…`.
+	 *
+	 * @param {FormData|FormLike|string} formData - Form data, a form, a submit
+	 * event, or a CSS selector for a form.
+	 * @returns {Fch} Current instance for chaining.
+	 *
+	 * @example
+	 * form.onsubmit = (e) => { e.preventDefault(); api.setFormData(e).send(); };
+	 */
 	setFormData(formData: FormData | FormLike | string): this {
 		// A string is a CSS selector here, never a body: `setBody()` is the door
 		// for string payloads.
@@ -1101,8 +1100,7 @@ export class Fch extends URL {
 	 * @throws {Error} If value is invalid.
 	 */
 	setTimeout(timeout: number): this {
-		if (!Number.isFinite(timeout) || timeout < 0) throw new Error(`Invalid timeout: ${timeout}`);
-		this.timeout = timeout;
+		this.timeout = assertTimeout(timeout);
 		return this;
 	}
 
@@ -1187,6 +1185,7 @@ export class Fch extends URL {
 		if (this.pluginNames.has(plugin.name)) return this;
 
 		this.pluginNames.add(plugin.name);
+		this.attachedPlugins.push(plugin);
 		const state = new Map<string, unknown>();
 		this.pluginState.set(plugin.name, state);
 
@@ -1437,9 +1436,15 @@ export class Fch extends URL {
 	 */
 	async makeRequest(): Promise<Response> {
 		// The eager memo belongs to `await req` / `.json()` / shortcuts: those
-		// must all observe ONE request. Polling is the opposite — every iteration
-		// needs a fresh one — so `poll()` calls `runWithHooks()` directly.
-		return this.runWithHooks(() => this.makeRequestInner());
+		// must all observe ONE request. Its hooks already ran when it started,
+		// so a memoised request is only cloned here — running the hooks again
+		// would fire `onRequest`/`onSuccess` twice for one request.
+		const eager = this.eagerRequest;
+		if (eager) return eager.then((response) => response.clone());
+
+		// Polling is the opposite — every iteration needs a fresh one — so
+		// `poll()` calls `runWithHooks()` directly.
+		return this.runWithHooks(() => this.executeRequest(this.retries, this.retryDelay));
 	}
 
 	/**
@@ -1459,7 +1464,6 @@ export class Fch extends URL {
 			this.pendingMethodWarning = null;
 			this.emit('method-warning', message);
 		}
-		
 
 		try {
 			// Request hooks run INSIDE the try: a hook may reject on purpose —
@@ -1483,24 +1487,6 @@ export class Fch extends URL {
 			// success, failure and abort alike, so a phase can never leak.
 			this.stopTimers();
 		}
-	}
-
-	/**
-	 * The request itself, without plugin hooks. Split out so plugin failures
-	 * cannot recurse into the same hook chain.
-	 */
-	private async makeRequestInner(): Promise<Response> {
-		// A request started by `start()` (or a shortcut) is reused, so `await req`,
-		// `req.json()`, `req.send()` etc. all observe the SAME request instead of
-		// firing a new one.
-		const eager = this.eagerRequest;
-		// Each caller gets its own clone: a Response body can be read once, so
-		// two awaits of a memoised request would otherwise race and the second
-		// body read would fail with "Body is unusable". The dedupe path below
-		// clones for the same reason.
-		if (eager) return eager.then((response) => response.clone());
-
-		return this.executeRequest(this.retries, this.retryDelay);
 	}
 
 	/**
@@ -1964,7 +1950,9 @@ export class Fch extends URL {
 	 *
 	 * Only in-flight work is cancelled — the instance stays usable, and the next
 	 * {@link Fch.makeRequest} starts with a fresh abort generation. A caller-supplied
-	 * `AbortController` is owned by the caller and is never aborted here.
+	 * `AbortController` (the `abortController` option) is owned by the caller and is
+	 * never aborted here. The caller's `signal` option is a separate matter: it is
+	 * only ever observed, never aborted, by `abort()`.
 	 *
 	 * @param {unknown} [reason] - Abort reason.
 	 * @returns {Fch} Current instance for chaining.
@@ -2008,12 +1996,20 @@ export class Fch extends URL {
 		clone.setRetries(this.retries);
 		clone.setRetryDelay(this.retryDelay);
 		clone.setMaxRetryDelay(this.maxRetryDelay);
-		clone.debug = this.debug;
 		clone.dedupe = this.dedupe;
 		clone.dedupeKey = this.dedupeKey;
 		clone.retryOn = this.retryOn;
 		clone.requestInterceptors = [...this.requestInterceptors];
 		clone.responseInterceptors = [...this.responseInterceptors];
+		// A custom fetch and the UI timers are configuration, so they carry over.
+		clone.fetchImpl = this.fetchImpl;
+		clone.setTimers(this.delayMs, this.timeoutMs);
+		// Plugins are attached again so the clone gets its own hooks and state,
+		// rather than silently losing them (the logger sink, nanostores, validate).
+		for (const plugin of this.attachedPlugins) clone.use(plugin);
+		// After the plugins: the logger plugin's install() sets `debug` from its
+		// own options, so copying it earlier would lose a later enableLogging().
+		clone.debug = this.debug;
 
 		const body = this.fetchOptions.body;
 		const contentType = this.headers.get('Content-Type') ?? undefined;
@@ -2129,7 +2125,11 @@ export class Fch extends URL {
 	 */
 	start(): this {
 		if (!this.eagerRequest) {
-			const eager = this.makeRequest();
+			// Hooks run here, once, around the memoised request. `makeRequest()`
+			// reuses the memo without running them again.
+			const eager = this.runWithHooks(() =>
+				this.executeRequest(this.retries, this.retryDelay),
+			);
 			this.eagerRequest = eager;
 			// A fire-and-forget call has no rejection handler; mark it handled so
 			// Node does not report an unhandled rejection. On failure the memo is
@@ -2343,20 +2343,35 @@ const BODYLESS_METHODS: ReadonlySet<ShortcutMethod> = new Set(['get', 'head', 'd
  * rest of the file reads a single property. `baseURL` is a shipped alias
  * (v1.1.0) and stays public; it just no longer has to be re-checked everywhere.
  */
-function withBaseAlias(options: FchInstanceOptions = {}): FchInstanceOptions {
-	const { baseURL, ...rest } = options;
+function withBaseAlias(options: FchInstanceOptions | null | undefined): FchInstanceOptions {
+	const { baseURL, ...rest } = options ?? {};
 	return baseURL !== undefined && rest.baseUrl === undefined
 		? { ...rest, baseUrl: baseURL }
 		: rest;
 }
 
+/**
+ * Validate a request timeout. Same rule as `setTimeout()`: a negative or NaN
+ * value is a mistake, not a way to disable the timeout (use 0 for that).
+ */
+function assertTimeout(timeout: number): number {
+	if (!Number.isFinite(timeout) || timeout < 0) throw new Error(`Invalid timeout: ${timeout}`);
+	return timeout;
+}
+
+/**
+ * Keys that configure the shortcut API itself. They are read by the shortcut
+ * and must never reach `fetch()`, whether they came from `create()` defaults or
+ * from a single call.
+ */
+const SHORTCUT_ONLY_KEYS = ['baseUrl', 'baseURL', 'encode'] as const;
+
 /** Drop shortcut-only keys so they never reach `fetch()`. */
-function toRequestOptions(options?: FchInstanceOptions): FetchRequestOptions {
+function toRequestOptions(options?: object): FetchRequestOptions {
 	if (!options) return {};
-	// `baseUrl` and `encode` are shortcut concerns; forwarding them would put
-	// junk on the fetch init object.
-	const { baseUrl, encode, ...rest } = options;
-	return rest;
+	const rest: Record<string, unknown> = { ...options };
+	for (const key of SHORTCUT_ONLY_KEYS) delete rest[key];
+	return rest as FetchRequestOptions;
 }
 
 /** Overlay header sets left-to-right, so shared defaults and per-call headers both apply. */
@@ -2369,7 +2384,11 @@ function mergeHeaders(...sources: (HeadersInit | undefined)[]): Headers {
 }
 
 /** Build the convenience methods shared by the default export and `create()`. */
-function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOptions) {
+function withShortcuts(
+	baseUrl: string | undefined,
+	defaults: FetchRequestOptions,
+	defaultEncode?: BodyEncoding,
+) {
 	const shortcuts = {} as {
 		[M in ShortcutMethod]: <T = unknown>(url: string | URL, ...rest: unknown[]) => FchCall<T>;
 	};
@@ -2381,6 +2400,15 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 			// encoding shorthand for `{ encode: "urlencoded" }`.
 			const hasBody = !BODYLESS_METHODS.has(method);
 			const first = rest[0] as FchBodyInput | undefined;
+
+			// The pre-1.15 form `post(url, body, encoding, options)` used to be
+			// accepted. Its options were silently dropped, so refuse it loudly.
+			if (rest.length > 2) {
+				throw new TypeError(
+					`${method}() takes at most 3 arguments: (url, body, options). ` +
+						'Move the encoding into options: `{ encode: "urlencoded", ...options }`.',
+				);
+			}
 
 			const second = rest[1];
 			// Options are always an object, so a string here can only be an encoding.
@@ -2397,7 +2425,7 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 
 			const request = new Fch(resolveUrl(url, options.baseUrl ?? baseUrl), {
 				// Shared defaults from `create()` first, then the per-call overrides.
-				...defaults,
+				...toRequestOptions(defaults),
 				...toRequestOptions(options),
 				headers: mergeHeaders(defaults.headers, options.headers),
 				method: method.toUpperCase(),
@@ -2408,7 +2436,7 @@ function withShortcuts(baseUrl: string | undefined, defaults: FetchRequestOption
 				// does. No body, and no form-object properties reach `fetch()`.
 				request.appendFormToQuery(form);
 			} else if (hasBody && first !== undefined && first !== null) {
-				applyShortcutBody(request, first, options.encode);
+				applyShortcutBody(request, first, options.encode ?? defaultEncode);
 			}
 
 			return toCall<T>(request);
@@ -2523,16 +2551,16 @@ const isStreamBody = (body: unknown): boolean =>
  * `request()` for a fresh builder with the same defaults.
  */
 export function create(options: FchInstanceOptions = {}) {
-	const { baseUrl, ...defaults } = withBaseAlias(options);
+	const { baseUrl, encode, ...defaults } = withBaseAlias(options);
 	const base = baseUrl;
 
 	return {
-		...withShortcuts(base, defaults),
+		...withShortcuts(base, defaults, encode),
 		/** A fresh builder carrying the shared defaults, for chaining. */
 		request: (url: string | URL, extra: FchInstanceOptions = {}) => {
 			const merged = withBaseAlias(extra);
 			return new Fch(resolveUrl(url, merged.baseUrl ?? base), {
-				...defaults,
+				...toRequestOptions(defaults),
 				...toRequestOptions(merged),
 				headers: mergeHeaders(defaults.headers, merged.headers),
 			});
