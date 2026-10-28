@@ -1,3 +1,10 @@
+## [1.15.1](https://github.com/westtrade/Fch/compare/v1.15.0...v1.15.1) (2026-10-28)
+
+
+### Bug Fixes
+
+* close the full-review findings on hooks, clone, encode and shortcut args ([6e681c0](https://github.com/westtrade/Fch/commit/6e681c0a740856c4542fddf0167784d6e38e9409))
+
 # [1.15.0](https://github.com/westtrade/Fch/compare/v1.14.0...v1.15.0) (2026-10-23)
 
 
