@@ -146,7 +146,7 @@ describe("documentation site", () => {
 		const sources = [
 			...pages.map((p) => ({ name: p.slug, body: p.body })),
 			{ name: "index.html", body: readFileSync(resolve(root, "docs-src/index.html"), "utf8") },
-			{ name: "Readme.md", body: readFileSync(resolve(root, "Readme.md"), "utf8") },
+			{ name: "README.md", body: readFileSync(resolve(root, "README.md"), "utf8") },
 		];
 
 		for (const { name, body } of sources) {
@@ -177,7 +177,7 @@ describe("documentation site", () => {
 
 		const sources = [
 			{ name: "getting-started", body: pages.find((p) => p.slug === "getting-started")!.body },
-			{ name: "Readme.md", body: readFileSync(resolve(root, "Readme.md"), "utf8") },
+			{ name: "README.md", body: readFileSync(resolve(root, "README.md"), "utf8") },
 		];
 
 		for (const { name, body } of sources) {
@@ -213,6 +213,23 @@ describe("documentation site", () => {
 		const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 		expect(pkg.scripts.prepare, "prepare script is required for github: installs").toBeTruthy();
 		expect(pkg.scripts.prepare).toContain("build");
+	});
+
+	test("the README has the conventional name and its links resolve", () => {
+		// Tooling (npm, GitHub, explorers) looks for `README.md` exactly. The
+		// file was once `Readme.md`, which worked only by accident of a
+		// case-insensitive filesystem.
+		expect(existsSync(resolve(root, "README.md")), "README.md is required").toBe(true);
+		expect(existsSync(resolve(root, "Readme.md")), "the old Readme.md must be renamed").toBe(false);
+
+		// Every relative link must point at a real file: the license badge once
+		// linked to a LICENSE that was never committed.
+		const readme = readFileSync(resolve(root, "README.md"), "utf8");
+		const relative = [...readme.matchAll(/\]\((?!https?:|#|mailto:)([^)]+)\)/g)].map((m) => m[1]);
+		for (const href of relative) {
+			const target = href.split("#")[0];
+			expect(existsSync(resolve(root, target)), `README links missing ${href}`).toBe(true);
+		}
 	});
 });
 

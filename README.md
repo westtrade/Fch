@@ -25,6 +25,27 @@ const [data, response] = await req.json<{ items: string[] }>();
 Because the URL and the client are one object, there is no separate "build a URL, then pass it to a
 client" step. `req instanceof URL` is `true`.
 
+## Quick start
+
+```bash
+npm install github:westtrade/Fch#v1.15.1
+```
+
+```ts
+import { Fch } from "@westtrade/fch";
+
+// GET, typed. Resolves to [parsedBody, response].
+const [user] = await new Fch("https://api.example.com/users/1").json<{ id: number; name: string }>();
+
+// POST JSON. An object body sets Content-Type for you.
+await new Fch("https://api.example.com/users")
+	.setMethod("POST")
+	.setJsonBody({ name: "Ada" })
+	.send();
+```
+
+That is the whole flow: one import, one URL, one call. Everything below is optional power.
+
 ## Features
 
 - **URL-first**: inherits `URL` — `pathname`, `host`, `origin`, `searchParams`, `hash`, `toString()`.
@@ -37,17 +58,46 @@ client" step. `req instanceof URL` is `true`.
 - **Abort**: cancel in-flight work and pending retry delays; the builder stays reusable.
 - **Awaitable**: the instance is thenable (`await req`), and also exposes `send()`, `.json()`, `.text()`, `.blob()`.
 
-## Installation
+## Important caveats
+
+Three behaviours that surprise first-time users. None is a bug; all are deliberate.
+
+1. **Every execution sends a new request.** The instance is a reusable *builder*, not a cached
+   promise: `await req`, `.then()`, `.catch()`, `.json()` and `send()` each start a fresh request.
+   Store one `Promise` if you need one request shared across callers.
+
+   ```ts
+   const req = new Fch("https://api.example.com/stats");
+   await req.json();   // request #1
+   await req.json();   // request #2 — not a cached body
+
+   // One request, two readers:
+   const pending = req.json();
+   const [a, b] = await Promise.all([pending, pending]);
+   ```
+
+2. **HTTP 4xx/5xx do not throw.** `fetch` semantics are preserved, so a `404` resolves normally.
+   Add `.after((res) => { if (!res.ok) throw new Error(…) })`, or retry with `retries` + `setRetryOn()`.
+
+3. **`clone()` drops your `signal` on purpose.** The clone gets fresh abort state, so cancelling the
+   original never cancels the clone. Pass `signal` again if the clone needs the same lifetime.
+
+   ```ts
+   const shared = new Fch("https://api.example.com/feed", { dedupe: true });
+   const mine = shared.clone();   // own abort generation, own signal
+
+   shared.abort();                // does NOT cancel `mine`
+   await mine.send();             // still works
+   ```
+
+`abort()` likewise only cancels in-flight work: the builder stays usable, and the next `send()`
+starts a fresh abort generation.
+
+## Installation details
 
 The package is scoped as **`@westtrade/fch`**. The unscoped name `fch` on npm
 belongs to an unrelated library, so `npm install fch` would install the wrong
 code.
-
-```bash
-npm install github:westtrade/Fch#v1.15.0
-# or
-yarn add github:westtrade/Fch#v1.15.0
-```
 
 It installs as `@westtrade/fch` regardless of how you fetch it:
 
@@ -55,11 +105,14 @@ It installs as `@westtrade/fch` regardless of how you fetch it:
 import { Fch } from "@westtrade/fch";
 ```
 
-Pin a release tag (see [tags](https://github.com/westtrade/Fch/tags)) so an
-install is reproducible; omit `#v1.15.0` to follow the default branch.
+The command above pins release `v1.15.1` (see [tags](https://github.com/westtrade/Fch/tags)) so an
+install is reproducible; omit the `#v1.15.1` suffix to follow the default branch.
 
 The package has no runtime dependencies. A git install compiles `dist/` for you
 via `prepare`; if you vendor the source, run `npm install && npm run build` once.
+
+Runtime: any environment with a global `fetch` — browsers, Node 18+, Deno, Bun,
+and edge workers. No polyfill, no bundled runtime dependencies.
 
 ## Usage
 

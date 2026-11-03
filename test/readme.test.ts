@@ -1,7 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from "vitest";
 import { Fch } from "../src/Fch";
 
-// Executes the exact snippets from Readme.md against a stubbed fetch, so the
+// Executes the exact snippets from README.md against a stubbed fetch, so the
 // README cannot drift away from the real API.
 
 let realFetch: typeof fetch;
@@ -23,7 +23,7 @@ afterEach(() => {
 	globalThis.fetch = realFetch;
 });
 
-describe("Readme examples", () => {
+describe("README examples", () => {
 	test("'The URL is the request' snippet", async () => {
 		const req = new Fch("https://api.example.com/v1/items?page=1");
 
@@ -196,5 +196,56 @@ describe("Readme examples", () => {
 		for (const m of ["get", "head", "post", "put", "patch", "delete", "request"]) {
 			expect(typeof (api as never as Record<string, unknown>)[m], m).toBe("function");
 		}
+	});
+});
+
+describe("README quick start and caveats", () => {
+	// These blocks were added for the first-run experience; they are executed so
+	// the "hello world" a reader copies cannot rot. The default stub above
+	// returns `{ items, id, name }`, so the user payload doubles as the assertion.
+
+	test("'Quick start' GET resolves to [body, response]", async () => {
+		const [user] = await new Fch("https://api.example.com/users/1").json<{
+			id: number;
+			name: string;
+		}>();
+		expect(user.name).toBe("Alice");
+		expect(user.id).toBe(1);
+	});
+
+	test("'Quick start' POST sends a JSON body", async () => {
+		await new Fch("https://api.example.com/users")
+			.setMethod("POST")
+			.setJsonBody({ name: "Ada" })
+			.send();
+
+		expect(calls[0].init.method).toBe("POST");
+		expect(calls[0].init.body).toBe(JSON.stringify({ name: "Ada" }));
+		// The point of the snippet: an object body sets the content type itself.
+		expect(new Headers(calls[0].init.headers).get("Content-Type")).toBe("application/json");
+	});
+
+	test("caveat 1: two awaits are two requests", async () => {
+		const req = new Fch("https://api.example.com/stats");
+		await req.json();
+		await req.json();
+		expect(calls).toHaveLength(2);
+	});
+
+	test("caveat 1: one stored promise is one request for two readers", async () => {
+		const req = new Fch("https://api.example.com/stats");
+		const pending = req.json();
+		const [a, b] = await Promise.all([pending, pending]);
+		expect(calls).toHaveLength(1);
+		expect(a).toEqual(b);
+	});
+
+	test("caveat 3: aborting the original leaves the clone usable", async () => {
+		const shared = new Fch("https://api.example.com/x", { dedupe: true });
+		const mine = shared.clone();
+		shared.abort();
+
+		await mine.send();
+		expect(calls).toHaveLength(1);
 	});
 });
