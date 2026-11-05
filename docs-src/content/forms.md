@@ -246,6 +246,14 @@ await req.send();
 `appendToFormData` switches the method to `POST` (unless it is already `PUT`)
 and clears `Content-Type` so the boundary is generated.
 
+> **Binary fields.** `Blob` and `File` pass through unchanged. `ArrayBuffer` and
+> typed arrays are copied with `structuredClone` (so the original buffer may be
+> reused by the caller). A `ReadableStream` cannot be cloned and is reported as a
+> `clone-warning`; a plain object is not a valid form field value and is rejected
+> (see `toFormValue` in `src/Fch.ts`).
+
+
+
 ## URL-encoded forms
 
 Classic HTML forms post `application/x-www-form-urlencoded` by default. If your

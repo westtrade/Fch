@@ -177,8 +177,8 @@ Use `fetch` when you need one request, no configuration, and you control both
 ends. It is the standard, it is everywhere, and `Fch` calls it internally —
 there is no second HTTP stack, no polyfill, no `XMLHttpRequest` fallback.
 
-`Fch` is the layer you would otherwise write yourself, ~6 kB gzipped, with the
-edge cases already handled.
+`Fch` is the layer you would otherwise write yourself, ~6 kB gzipped/minified,
+with the edge cases already handled.
 
 ## Side by side
 

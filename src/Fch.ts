@@ -2525,9 +2525,16 @@ export function applyShortcutBody(
 
 /** A form field value: blobs pass through, everything else is stringified. */
 function toFormValue(value: unknown): string | Blob {
-	return typeof value === 'object' && value !== null && !Array.isArray(value)
-		? (value as Blob)
-		: String(value);
+	// A plain object is not a valid form field value and would fail later in
+	// `FormData.append` with a confusing TypeError. Blob/File pass through;
+	// everything else is stringified as a scalar.
+	if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+		if (value instanceof Blob) return value;
+		throw new TypeError(
+			`Expected form field value: string, number, boolean, Blob or File, got ${typeof value}`,
+		);
+	}
+	return String(value);
 }
 
 const isStreamBody = (body: unknown): boolean =>

@@ -363,6 +363,8 @@ and `request` attached.
 | `DOMException` / `AbortError` | `abort()` or your signal |
 | `SyntaxError` | `.json()` on a non-JSON body |
 
+
+| `TypeError: Fch cannot resolve a protocol-relative URL` | `//host/path` without a `baseUrl` |
 ## A complete example
 
 ```ts
